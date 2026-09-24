@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import confetti from 'canvas-confetti';
 import { ToastProvider, useToast } from './components/Toast';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
@@ -46,8 +47,8 @@ function MainApp() {
     if (!currentUser) return;
     try {
       const [friendsList, requests] = await Promise.all([
-        getFriends(currentUser.id),
-        getFriendRequests(currentUser.id),
+        getFriends(currentUser.username),
+        getFriendRequests(currentUser.username),
       ]);
       setFriends(friendsList);
       setFriendRequests(requests);
@@ -60,9 +61,9 @@ function MainApp() {
   const loadActiveMessages = useCallback(async () => {
     if (!currentUser || !activeFriend) return;
     try {
-      const msgs = await getMessagesBetween(currentUser.id, activeFriend.id);
+      const msgs = await getMessagesBetween(currentUser.username, activeFriend.username);
       setMessages(msgs);
-      setUnreadCountMap((prev) => ({ ...prev, [activeFriend.id]: 0 }));
+      setUnreadCountMap((prev) => ({ ...prev, [activeFriend.username]: 0 }));
     } catch (err) {
       console.error('Error loading messages:', err);
     }
@@ -96,35 +97,63 @@ function MainApp() {
     if (!currentUser) return;
 
     const unsubscribe = subscribeToChatEvents((eventType, data) => {
+      const myName = currentUser.username.toLowerCase();
+
+      // 1. Yeni Mesaj (Gönderilen veya Alınan)
       if (eventType === 'NEW_MESSAGE') {
         const msg = data;
+        const sId = (msg.sender_id || msg.sender_username || '').toLowerCase();
+        const rId = (msg.receiver_id || msg.receiver_username || '').toLowerCase();
+        const activeName = activeFriend?.username?.toLowerCase();
+
+        // Eğer aktif sohbetimize aitse listeye ekle
         if (
-          (msg.sender_id === currentUser.id && msg.receiver_id === activeFriend?.id) ||
-          (msg.sender_id === activeFriend?.id && msg.receiver_id === currentUser.id)
+          (sId === myName && rId === activeName) ||
+          (sId === activeName && rId === myName)
         ) {
           setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
         }
 
-        const otherId = msg.sender_id === currentUser.id ? msg.receiver_id : msg.sender_id;
-        setLastMessagesMap((prev) => ({ ...prev, [otherId]: msg }));
+        // Son mesaj haritasını güncelle
+        const otherName = sId === myName ? rId : sId;
+        setLastMessagesMap((prev) => ({ ...prev, [otherName]: msg }));
 
-        if (msg.receiver_id === currentUser.id && msg.sender_id !== activeFriend?.id) {
+        // Eğer mesaj bize geldiyse ve o an aktif sohbet değilse unread artır
+        if (rId === myName && sId !== activeName) {
           setUnreadCountMap((prev) => ({
             ...prev,
-            [msg.sender_id]: (prev[msg.sender_id] || 0) + 1,
+            [sId]: (prev[sId] || 0) + 1,
           }));
-          showInfo('Yeni bir mesajınız var 💬');
+          showInfo(`@${sId} kullanıcısından yeni bir mesaj! 💬`);
         }
-      } else if (eventType === 'NEW_FRIEND_REQUEST') {
+      }
+
+      // 2. Yeni Arkadaşlık İsteği
+      else if (eventType === 'NEW_FRIEND_REQUEST') {
         reloadFriendsAndRequests();
         showInfo('Yeni bir sohbet isteğiniz var! 🔔');
-      } else if (eventType === 'FRIEND_REQUEST_ACCEPTED') {
+      }
+
+      // 3. İstek Kabul Edildi
+      else if (eventType === 'FRIEND_ACCEPTED') {
         reloadFriendsAndRequests();
-        showSuccess('Sohbet isteğiniz kabul edildi! 🎉');
-      } else if (eventType === 'USER_STATUS') {
+        confetti({
+          particleCount: 70,
+          spread: 60,
+          origin: { y: 0.7 },
+        });
+        showSuccess('Sohbet isteğiniz kabul edildi! Hemen mesajlaşabilirsiniz 🎉');
+      }
+
+      // 4. Çevrimiçi Varlık Durumu
+      else if (eventType === 'USER_STATUS') {
+        const uName = data.username.toLowerCase();
         setFriends((prev) =>
-          prev.map((f) => (f.id === data.id || f.username === data.username ? { ...f, ...data } : f))
+          prev.map((f) => (f.username.toLowerCase() === uName ? { ...f, ...data } : f))
         );
+        if (activeFriend && activeFriend.username.toLowerCase() === uName) {
+          setActiveFriend((prev) => ({ ...prev, ...data }));
+        }
       }
     });
 
@@ -137,7 +166,7 @@ function MainApp() {
   const handleLogout = async () => {
     if (currentUser) {
       try {
-        await updateUserProfile(currentUser.id, { is_online: false, last_seen: new Date().toISOString() });
+        await updateUserProfile(currentUser.username, { is_online: false, last_seen: new Date().toISOString() });
       } catch {}
     }
     setCurrentUser(null);
@@ -157,7 +186,7 @@ function MainApp() {
         <Sidebar
           currentUser={currentUser}
           friends={friends}
-          activeFriendId={activeFriend?.id}
+          activeFriendId={activeFriend?.username}
           onSelectFriend={(friend) => setActiveFriend(friend)}
           onOpenSearch={() => setIsSearchOpen(true)}
           onOpenRequests={() => setIsRequestsOpen(true)}
@@ -179,7 +208,10 @@ function MainApp() {
           activeFriend={activeFriend}
           messages={messages}
           onBack={() => setActiveFriend(null)}
-          onMessageSent={() => reloadFriendsAndRequests()}
+          onMessageSent={() => {
+            loadActiveMessages();
+            reloadFriendsAndRequests();
+          }}
         />
       </div>
 
@@ -208,7 +240,9 @@ function MainApp() {
           isOpen={isRequestsOpen}
           onClose={() => setIsRequestsOpen(false)}
           requests={friendRequests}
-          onUpdated={() => reloadFriendsAndRequests()}
+          onUpdated={() => {
+            reloadFriendsAndRequests();
+          }}
         />
       )}
 

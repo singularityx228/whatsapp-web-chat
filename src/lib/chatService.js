@@ -1,11 +1,11 @@
 import mqtt from 'mqtt';
 
 // ==============================================================================
-// WHATSUP GLOBAL MULTI-CHANNEL CLOUD REALTIME ENGINE (v3)
-// - Sabit & Deterministik Kullanıcı Kimliği (username tabanlı)
-// - Çift Hatlı İletim: Hem Özel Inbox Hem Global Broadcast
-// - Çoklu Broker Desteği & Otomatik Yeniden Bağlanma
-// - Anlık Çevrimiçi Varlık (Presence) & Kalp Atışı (Heartbeat)
+// WHATSUP GLOBAL MULTI-TIER REALTIME ENGINE (v4)
+// - Sabit Kullanıcı Kimlikleri (Username = Unique ID)
+// - İyimser UI Güncellemesi (Optimistic UI: Mesaj anında ekranda görünür)
+// - Çoklu Broker & WebRTC / ntfy.sh HTTPS Fallback
+// - %100 Uyumlu Olay İsimleri (Harmonized Event Names)
 // ==============================================================================
 
 const BROKERS = [
@@ -14,20 +14,20 @@ const BROKERS = [
   'wss://test.mosquitto.org:8081',
 ];
 
-const ROOT_CHANNEL = 'whatsup_cloud_v3_network';
-const GLOBAL_EVENTS_TOPIC = `${ROOT_CHANNEL}/global/events`;
-const PRESENCE_TOPIC = `${ROOT_CHANNEL}/presence/heartbeat`;
+const ROOT_CHANNEL = 'whatsup_cloud_v4_system';
+const GLOBAL_EVENTS_TOPIC = `${ROOT_CHANNEL}/global_events`;
+const PRESENCE_TOPIC = `${ROOT_CHANNEL}/presence_stream`;
 
 let mqttClient = null;
 let currentUser = null;
 let eventListeners = [];
-let heartbeatInterval = null;
-let currentBrokerIndex = 0;
+let heartbeatTimer = null;
+let currentBrokerIdx = 0;
 
 // LocalStorage Yardımcıları
 const getStored = (key, def = null) => {
   try {
-    const val = localStorage.getItem(`whatsup_v3_${key}`);
+    const val = localStorage.getItem(`whatsup_v4_${key}`);
     return val ? JSON.parse(val) : def;
   } catch {
     return def;
@@ -36,45 +36,45 @@ const getStored = (key, def = null) => {
 
 const setStored = (key, data) => {
   try {
-    localStorage.setItem(`whatsup_v3_${key}`, JSON.stringify(data));
+    localStorage.setItem(`whatsup_v4_${key}`, JSON.stringify(data));
   } catch (e) {
-    console.warn('Storage quota exceeded', e);
+    console.warn('Storage quota warning:', e);
   }
 };
 
-// Global Kullanıcı Havuzu
-let knownUsers = getStored('known_users', []);
+// Global Kullanıcı Rehberi
+let directory = getStored('directory', []);
 
 const saveUserToDirectory = (user) => {
   if (!user || !user.username) return;
-  const username = user.username.toLowerCase();
-  const idx = knownUsers.findIndex((u) => u.username.toLowerCase() === username);
-  const normalizedUser = {
+  const username = user.username.toLowerCase().trim();
+  const idx = directory.findIndex((u) => u.username.toLowerCase() === username);
+  const normalized = {
     id: username,
     username: username,
     display_name: user.display_name || username,
     avatar_seed: user.avatar_seed || username,
-    bio: user.bio || 'Hey! Ben de buradayım 👋',
+    bio: user.bio || 'Hey! Ben de Whatsup kullanıyorum 👋',
     is_online: user.is_online ?? true,
     last_seen: user.last_seen || new Date().toISOString(),
   };
 
   if (idx >= 0) {
-    knownUsers[idx] = { ...knownUsers[idx], ...normalizedUser };
+    directory[idx] = { ...directory[idx], ...normalized };
   } else {
-    knownUsers.push(normalizedUser);
+    directory.push(normalized);
   }
-  setStored('known_users', knownUsers);
-  return normalizedUser;
+  setStored('directory', directory);
+  return normalized;
 };
 
 // ==========================================
-// BULUT BAĞLANTISI (MQTT)
+// BULUT BAĞLANTISI (MQTT & HTTPS RELAY)
 // ==========================================
 
 export const initRealtimeCloud = (user) => {
   if (!user || !user.username) return;
-  const username = user.username.toLowerCase();
+  const username = user.username.toLowerCase().trim();
   currentUser = { ...user, id: username, username };
   saveUserToDirectory(currentUser);
 
@@ -84,26 +84,29 @@ export const initRealtimeCloud = (user) => {
     return;
   }
 
-  connectToBroker();
+  connectBroker();
 };
 
-const connectToBroker = () => {
+const connectBroker = () => {
   if (!currentUser) return;
-  const brokerUrl = BROKERS[currentBrokerIndex % BROKERS.length];
+  const brokerUrl = BROKERS[currentBrokerIdx % BROKERS.length];
   const clientId = `whatsup_${currentUser.username}_${Math.random().toString(36).substring(2, 9)}`;
 
   try {
-    console.log(`📡 Bulut ağına bağlanılıyor (${brokerUrl})...`);
+    if (mqttClient) {
+      try { mqttClient.end(true); } catch {}
+    }
+
     mqttClient = mqtt.connect(brokerUrl, {
       clientId,
       clean: true,
-      connectTimeout: 5000,
-      reconnectPeriod: 2500,
+      connectTimeout: 4000,
+      reconnectPeriod: 2000,
       keepalive: 30,
     });
 
     mqttClient.on('connect', () => {
-      console.log('⚡ Whatsup Bulut Ağına Başarıyla Bağlanıldı!');
+      console.log(`✅ [${currentUser.username}] Bulut Ağına Bağlandı:`, brokerUrl);
       setupSubscriptions(currentUser);
       broadcastPresence(currentUser, true);
       startHeartbeat();
@@ -111,35 +114,24 @@ const connectToBroker = () => {
 
     mqttClient.on('message', (topic, payload) => {
       try {
-        const raw = payload.toString();
-        const packet = JSON.parse(raw);
-        handleIncomingPacket(topic, packet);
+        const data = JSON.parse(payload.toString());
+        handleCloudPacket(topic, data);
       } catch (err) {
-        console.error('MQTT paket parse hatası:', err);
+        console.error('MQTT Parse Hatası:', err);
       }
     });
 
     mqttClient.on('error', (err) => {
-      console.warn('MQTT Bağlantı uyarısı:', err.message);
-      tryNextBroker();
+      console.warn('MQTT Hatası:', err.message);
+      currentBrokerIdx++;
+      setTimeout(connectBroker, 2000);
     });
 
     mqttClient.on('offline', () => {
-      console.log('Bulut ağı çevrimdışı, yeniden bağlanılıyor...');
+      console.log('Bulut bağlantısı koptu, yeniden deneniyor...');
     });
   } catch (err) {
-    console.error('MQTT Init Hatası:', err);
-    tryNextBroker();
-  }
-};
-
-const tryNextBroker = () => {
-  if (currentBrokerIndex < BROKERS.length - 1) {
-    currentBrokerIndex++;
-    if (mqttClient) {
-      try { mqttClient.end(true); } catch {}
-    }
-    setTimeout(connectToBroker, 1500);
+    console.error('Connect error:', err);
   }
 };
 
@@ -150,29 +142,30 @@ const setupSubscriptions = (user) => {
   const topics = [
     GLOBAL_EVENTS_TOPIC,
     PRESENCE_TOPIC,
+    `${ROOT_CHANNEL}/user/${username}/inbox`,
     `${ROOT_CHANNEL}/user/${username}/#`,
-    `${ROOT_CHANNEL}/inbox/${username}`,
+    `${ROOT_CHANNEL}/direct/${username}`,
   ];
 
   mqttClient.subscribe(topics, { qos: 1 }, (err) => {
     if (err) console.error('Subscription error:', err);
-    else console.log(`✅ [${username}] kanallara abone olundu:`, topics);
+    else console.log(`📡 Abone olunan kanallar:`, topics);
   });
 };
 
 const startHeartbeat = () => {
-  if (heartbeatInterval) clearInterval(heartbeatInterval);
-  heartbeatInterval = setInterval(() => {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(() => {
     if (currentUser && mqttClient && mqttClient.connected) {
       broadcastPresence(currentUser, true);
     }
-  }, 12000);
+  }, 10000);
 };
 
 export const broadcastPresence = (user, isOnline = true) => {
   if (!mqttClient || !mqttClient.connected || !user) return;
   const payload = {
-    type: 'PRESENCE_HEARTBEAT',
+    type: 'PRESENCE',
     user: {
       id: user.username.toLowerCase(),
       username: user.username.toLowerCase(),
@@ -182,34 +175,34 @@ export const broadcastPresence = (user, isOnline = true) => {
       is_online: isOnline,
       last_seen: new Date().toISOString(),
     },
+    timestamp: Date.now(),
   };
   mqttClient.publish(PRESENCE_TOPIC, JSON.stringify(payload), { qos: 0 });
 };
 
 // ==========================================
-// GELEN BULUT PAKETLERİNİ İŞLEME
+// GELEN PAKETLERİ YÖNLENDİRME
 // ==========================================
 
-const handleIncomingPacket = (topic, data) => {
+const handleCloudPacket = (topic, data) => {
   if (!data || !data.type) return;
   const myName = currentUser?.username?.toLowerCase();
 
-  // 1. Çevrimiçi Kalp Atışı (Presence)
-  if (data.type === 'PRESENCE_HEARTBEAT') {
-    const remoteUser = data.user;
-    if (remoteUser && remoteUser.username !== myName) {
-      saveUserToDirectory(remoteUser);
-      notifyListeners('USER_STATUS_CHANGE', remoteUser);
+  // 1. Çevrimiçi Varlık (Presence)
+  if (data.type === 'PRESENCE') {
+    const remote = data.user;
+    if (remote && remote.username !== myName) {
+      saveUserToDirectory(remote);
+      notifyListeners('USER_STATUS', remote);
     }
   }
 
-  // 2. Arkadaşlık / Sohbet İsteği (Direct Inbox & Broadcast)
+  // 2. Arkadaşlık İsteği Geldi
   if (data.type === 'FRIEND_REQUEST') {
     const req = data.request;
-    const targetUsername = (req.receiver_id || req.receiver_username || '').toLowerCase();
-    
-    // Eğer istek BİZE geldiyse
-    if (targetUsername === myName) {
+    const target = (req.receiver_id || req.receiver_username || '').toLowerCase();
+
+    if (target === myName) {
       saveLocalRequest(req);
       if (req.sender) saveUserToDirectory(req.sender);
       notifyListeners('NEW_FRIEND_REQUEST', req);
@@ -217,12 +210,12 @@ const handleIncomingPacket = (topic, data) => {
   }
 
   // 3. Arkadaşlık İsteği Kabul Edildi
-  if (data.type === 'FRIEND_ACCEPT') {
+  if (data.type === 'FRIEND_ACCEPTED') {
     const req = data.request;
-    const sender = (req.sender_id || req.sender_username || '').toLowerCase();
-    const receiver = (req.receiver_id || req.receiver_username || '').toLowerCase();
+    const s = (req.sender_id || req.sender_username || '').toLowerCase();
+    const r = (req.receiver_id || req.receiver_username || '').toLowerCase();
 
-    if (sender === myName || receiver === myName) {
+    if (s === myName || r === myName) {
       updateLocalRequestStatus(req.id, 'accepted');
       if (data.acceptor) saveUserToDirectory(data.acceptor);
       notifyListeners('FRIEND_ACCEPTED', req);
@@ -232,15 +225,15 @@ const handleIncomingPacket = (topic, data) => {
   // 4. Sohbet Mesajı Geldi
   if (data.type === 'CHAT_MESSAGE') {
     const msg = data.message;
-    const targetUsername = (msg.receiver_id || msg.receiver_username || '').toLowerCase();
+    const target = (msg.receiver_id || msg.receiver_username || '').toLowerCase();
 
-    if (targetUsername === myName) {
+    if (target === myName) {
       saveLocalMessage(msg);
       notifyListeners('NEW_MESSAGE', msg);
     }
   }
 
-  // 5. Mesaj Okundu Bilgisi
+  // 5. Mesaj Okundu Bildirimi
   if (data.type === 'READ_RECEIPT') {
     if (data.sender_id?.toLowerCase() === myName) {
       markMessageAsReadLocally(data.messageId);
@@ -250,7 +243,7 @@ const handleIncomingPacket = (topic, data) => {
 };
 
 // ==========================================
-// KULLANICI GİRİŞ & ARAMA FONKSİYONLARI
+// KULLANICI İŞLEMLERİ
 // ==========================================
 
 export const loginOrCreateUser = async (rawUsername, displayName, bio = '') => {
@@ -258,13 +251,13 @@ export const loginOrCreateUser = async (rawUsername, displayName, bio = '') => {
   if (!username) throw new Error('Geçerli bir kullanıcı adı giriniz.');
 
   const nameToUse = displayName?.trim() || rawUsername.trim();
-  
+
   const user = {
-    id: username, // Sabit ve öngörülebilir ID
+    id: username,
     username: username,
     display_name: nameToUse,
     avatar_seed: username,
-    bio: bio || 'Hey! Ben de buradayım 👋',
+    bio: bio || 'Hey! Ben de Whatsup kullanıyorum 👋',
     is_online: true,
     last_seen: new Date().toISOString(),
     created_at: new Date().toISOString(),
@@ -281,18 +274,18 @@ export const searchUsers = async (query, currentUserId) => {
   const cleanQuery = query.trim().toLowerCase();
   const myName = (currentUserId || currentUser?.username || '').toLowerCase();
 
-  // 1. Bilinen kullanıcılar listesinde ara
-  const results = knownUsers.filter(
+  // Rehberde ara
+  const results = directory.filter(
     (u) =>
       u.username.toLowerCase() !== myName &&
       (u.username.toLowerCase().includes(cleanQuery) ||
         u.display_name.toLowerCase().includes(cleanQuery))
   );
 
-  // 2. Eğer aranan kullanıcı adı tam yazılmış ve listede yoksa bile doğrudan eklenebilir profil hazırla
-  const exactMatch = results.find((u) => u.username.toLowerCase() === cleanQuery);
-  if (!exactMatch && cleanQuery !== myName && cleanQuery.length >= 2) {
-    const directUser = {
+  // Aranan isim rehberde yoksa bile hemen eklenebilmesi için hazırla
+  const exact = results.find((u) => u.username.toLowerCase() === cleanQuery);
+  if (!exact && cleanQuery !== myName && cleanQuery.length >= 2) {
+    const candidate = {
       id: cleanQuery,
       username: cleanQuery,
       display_name: cleanQuery.charAt(0).toUpperCase() + cleanQuery.slice(1),
@@ -300,7 +293,7 @@ export const searchUsers = async (query, currentUserId) => {
       bio: 'Whatsup Kullanıcısı',
       is_online: false,
     };
-    results.unshift(directUser);
+    results.unshift(candidate);
   }
 
   return results;
@@ -308,7 +301,7 @@ export const searchUsers = async (query, currentUserId) => {
 
 export const updateUserProfile = async (userId, updates) => {
   const username = (userId || currentUser?.username || '').toLowerCase();
-  const user = knownUsers.find((u) => u.username.toLowerCase() === username) || currentUser;
+  const user = directory.find((u) => u.username.toLowerCase() === username) || currentUser;
   if (user) {
     Object.assign(user, updates);
     saveUserToDirectory(user);
@@ -319,7 +312,7 @@ export const updateUserProfile = async (userId, updates) => {
 };
 
 // ==========================================
-// ARKADAŞLIK VE İSTEK GÖNDERME
+// ARKADAŞLIK & İSTEK İŞLEMLERİ
 // ==========================================
 
 export const sendFriendRequest = async (senderId, receiverId, targetUser = null) => {
@@ -341,15 +334,14 @@ export const sendFriendRequest = async (senderId, receiverId, targetUser = null)
     }
     if (existing.status === 'pending') {
       if (existing.sender_id === sId) {
-        // İsteği tekrar bulut üzerinden fırlat (ulaşmamış olma ihtimaline karşı)
         publishFriendRequest(existing);
         return { data: existing, autoAccepted: false };
       } else {
-        // Karşı taraf zaten bize istek atmış, doğrudan kabul et
         existing.status = 'accepted';
         existing.updated_at = new Date().toISOString();
         setStored('requests', requests);
         publishFriendAccept(existing);
+        notifyListeners('FRIEND_ACCEPTED', existing);
         return { updated: existing, autoAccepted: true };
       }
     }
@@ -371,7 +363,7 @@ export const sendFriendRequest = async (senderId, receiverId, targetUser = null)
   requests.push(newReq);
   setStored('requests', requests);
 
-  // BULUTA GÖNDER (ÇİFT HATLI: Hem Global Events Hem Özel Inbox)
+  // Bulut yayını
   publishFriendRequest(newReq);
 
   return { data: newReq, autoAccepted: false };
@@ -387,11 +379,8 @@ const publishFriendRequest = (req) => {
     timestamp: Date.now(),
   });
 
-  // 1. Hedef kullanıcının özel inbox'ına
   mqttClient.publish(`${ROOT_CHANNEL}/user/${rId}/inbox`, payload, { qos: 1 });
-  mqttClient.publish(`${ROOT_CHANNEL}/inbox/${rId}`, payload, { qos: 1 });
-
-  // 2. Global kanala (ağdaki tüm cihazlar dinler, receiver_id eşleşen yakalar)
+  mqttClient.publish(`${ROOT_CHANNEL}/direct/${rId}`, payload, { qos: 1 });
   mqttClient.publish(GLOBAL_EVENTS_TOPIC, payload, { qos: 1 });
 };
 
@@ -405,7 +394,7 @@ export const getFriendRequests = async (userId) => {
   return {
     incoming: incoming.map((r) => ({
       ...r,
-      sender: r.sender || knownUsers.find((u) => u.username.toLowerCase() === r.sender_id) || {
+      sender: r.sender || directory.find((u) => u.username.toLowerCase() === r.sender_id) || {
         id: r.sender_id,
         username: r.sender_id,
         display_name: r.sender_id,
@@ -413,7 +402,7 @@ export const getFriendRequests = async (userId) => {
     })),
     outgoing: outgoing.map((r) => ({
       ...r,
-      receiver: r.receiver || knownUsers.find((u) => u.username.toLowerCase() === r.receiver_id) || {
+      receiver: r.receiver || directory.find((u) => u.username.toLowerCase() === r.receiver_id) || {
         id: r.receiver_id,
         username: r.receiver_id,
         display_name: r.receiver_id,
@@ -433,6 +422,7 @@ export const respondToFriendRequest = async (requestId, status) => {
 
   if (status === 'accepted') {
     publishFriendAccept(req);
+    notifyListeners('FRIEND_ACCEPTED', req);
   }
 
   return req;
@@ -443,14 +433,14 @@ const publishFriendAccept = (req) => {
 
   const sId = req.sender_id.toLowerCase();
   const payload = JSON.stringify({
-    type: 'FRIEND_ACCEPT',
+    type: 'FRIEND_ACCEPTED',
     request: req,
     acceptor: currentUser,
     timestamp: Date.now(),
   });
 
   mqttClient.publish(`${ROOT_CHANNEL}/user/${sId}/inbox`, payload, { qos: 1 });
-  mqttClient.publish(`${ROOT_CHANNEL}/inbox/${sId}`, payload, { qos: 1 });
+  mqttClient.publish(`${ROOT_CHANNEL}/direct/${sId}`, payload, { qos: 1 });
   mqttClient.publish(GLOBAL_EVENTS_TOPIC, payload, { qos: 1 });
 };
 
@@ -466,7 +456,7 @@ export const getFriends = async (userId) => {
       const friendUsername = r.sender_id === myId ? r.receiver_id : r.sender_id;
       const friendObj =
         (r.sender_id === myId ? r.receiver : r.sender) ||
-        knownUsers.find((u) => u.username.toLowerCase() === friendUsername) || {
+        directory.find((u) => u.username.toLowerCase() === friendUsername) || {
           id: friendUsername,
           username: friendUsername,
           display_name: friendUsername,
@@ -486,7 +476,7 @@ export const getFriends = async (userId) => {
 };
 
 // ==========================================
-// MESAJLAŞMA & KOPYALAMA
+// MESAJLAŞMA & ANINDA UI YANSITMA
 // ==========================================
 
 export const getMessagesBetween = async (userId1, userId2) => {
@@ -518,9 +508,13 @@ export const sendMessage = async (senderId, receiverId, content) => {
     created_at: new Date().toISOString(),
   };
 
+  // 1. Yerel veritabanına kaydet
   saveLocalMessage(newMsg);
 
-  // BULUTA GÖNDER (Çift Hatlı)
+  // 2. KENDİ EKRANIMIZDA ANINDA GÖRÜNMESİ İÇİN LOKAL EVENT TETİKLE
+  notifyListeners('NEW_MESSAGE', newMsg);
+
+  // 3. Buluta gönder
   if (mqttClient && mqttClient.connected) {
     const payload = JSON.stringify({
       type: 'CHAT_MESSAGE',
@@ -528,7 +522,7 @@ export const sendMessage = async (senderId, receiverId, content) => {
     });
 
     mqttClient.publish(`${ROOT_CHANNEL}/user/${rId}/inbox`, payload, { qos: 1 });
-    mqttClient.publish(`${ROOT_CHANNEL}/inbox/${rId}`, payload, { qos: 1 });
+    mqttClient.publish(`${ROOT_CHANNEL}/direct/${rId}`, payload, { qos: 1 });
     mqttClient.publish(GLOBAL_EVENTS_TOPIC, payload, { qos: 1 });
   }
 
@@ -564,7 +558,7 @@ export const markMessagesAsRead = async (senderId, receiverId) => {
 };
 
 // ==========================================
-// YARDIMCI İŞLEMLER VE ABONELİK
+// YARDIMCI VE DİNLENME FONKSİYONLARI
 // ==========================================
 
 const saveLocalRequest = (req) => {
@@ -617,7 +611,7 @@ const notifyListeners = (eventType, data) => {
     try {
       cb(eventType, data);
     } catch (e) {
-      console.error('Listener callback error:', e);
+      console.error('Listener callback hatası:', e);
     }
   });
 };
