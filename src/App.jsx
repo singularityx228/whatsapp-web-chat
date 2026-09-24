@@ -8,12 +8,12 @@ import UserSearchModal from './components/UserSearchModal';
 import FriendRequestsModal from './components/FriendRequestsModal';
 import UserProfileModal from './components/UserProfileModal';
 import {
-  loginOrCreateUser,
   getFriends,
   getFriendRequests,
   getMessagesBetween,
   updateUserProfile,
   subscribeToChatEvents,
+  sanitizeUsername,
 } from './lib/chatService';
 
 function MainApp() {
@@ -46,9 +46,10 @@ function MainApp() {
   const reloadFriendsAndRequests = useCallback(async () => {
     if (!currentUser) return;
     try {
+      const myUsername = sanitizeUsername(currentUser.username);
       const [friendsList, requests] = await Promise.all([
-        getFriends(currentUser.username),
-        getFriendRequests(currentUser.username),
+        getFriends(myUsername),
+        getFriendRequests(myUsername),
       ]);
       setFriends(friendsList);
       setFriendRequests(requests);
@@ -61,9 +62,11 @@ function MainApp() {
   const loadActiveMessages = useCallback(async () => {
     if (!currentUser || !activeFriend) return;
     try {
-      const msgs = await getMessagesBetween(currentUser.username, activeFriend.username);
+      const myUsername = sanitizeUsername(currentUser.username);
+      const friendUsername = sanitizeUsername(activeFriend.username);
+      const msgs = await getMessagesBetween(myUsername, friendUsername);
       setMessages(msgs);
-      setUnreadCountMap((prev) => ({ ...prev, [activeFriend.username]: 0 }));
+      setUnreadCountMap((prev) => ({ ...prev, [friendUsername]: 0 }));
     } catch (err) {
       console.error('Error loading messages:', err);
     }
@@ -84,28 +87,38 @@ function MainApp() {
     }
   }, [currentUser, reloadFriendsAndRequests]);
 
-  // Aktif arkadaş değişimi
+  // Aktif arkadaş değiştiğinde ilk yükleme
   useEffect(() => {
     if (activeFriend) {
       loadActiveMessages();
     }
   }, [activeFriend, loadActiveMessages]);
 
-  // Gerçek Zamanlı Bulut Dinleyicisi
+  // Aktif Sohbet Canlı Mesaj Yoklama (Her 1.5 saniyede buluttan çek)
+  useEffect(() => {
+    if (!currentUser || !activeFriend) return;
+
+    const chatPollInterval = setInterval(() => {
+      loadActiveMessages();
+    }, 1500);
+
+    return () => clearInterval(chatPollInterval);
+  }, [currentUser, activeFriend, loadActiveMessages]);
+
+  // Gerçek Zamanlı Bulut Olay Dinleyicisi
   useEffect(() => {
     if (!currentUser) return;
 
     const unsubscribe = subscribeToChatEvents((eventType, data) => {
-      const myName = currentUser.username.toLowerCase();
+      const myName = sanitizeUsername(currentUser.username);
 
       // 1. Yeni Mesaj
       if (eventType === 'NEW_MESSAGE') {
         const msg = data;
-        const sId = (msg.sender_id || msg.sender_username || '').toLowerCase();
-        const rId = (msg.receiver_id || msg.receiver_username || '').toLowerCase();
-        const activeName = activeFriend?.username?.toLowerCase();
+        const sId = sanitizeUsername(msg.sender_username || msg.sender_id);
+        const rId = sanitizeUsername(msg.receiver_username || msg.receiver_id);
+        const activeName = sanitizeUsername(activeFriend?.username);
 
-        // Eğer aktif sohbetimize aitse listeye ekle
         if (
           (sId === myName && rId === activeName) ||
           (sId === activeName && rId === myName)
@@ -113,11 +126,9 @@ function MainApp() {
           setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
         }
 
-        // Son mesaj haritasını güncelle
         const otherName = sId === myName ? rId : sId;
         setLastMessagesMap((prev) => ({ ...prev, [otherName]: msg }));
 
-        // Eğer mesaj bize geldiyse ve o an aktif sohbet değilse unread artır
         if (rId === myName && sId !== activeName) {
           setUnreadCountMap((prev) => ({
             ...prev,
@@ -128,9 +139,8 @@ function MainApp() {
       }
 
       // 2. Yeni Arkadaşlık İsteği
-      else if (eventType === 'NEW_FRIEND_REQUEST') {
+      else if (eventType === 'NEW_FRIEND_REQUEST' || eventType === 'REQUEST_SENT') {
         reloadFriendsAndRequests();
-        showInfo('Yeni bir sohbet isteğiniz var! 🔔');
       }
 
       // 3. İstek Kabul Edildi
@@ -141,23 +151,12 @@ function MainApp() {
           spread: 70,
           origin: { y: 0.65 },
         });
-        showSuccess('Sohbet isteğiniz kabul edildi! Hemen mesajlaşabilirsiniz 🎉');
+        showSuccess('Sohbet isteği onaylandı! 🎉');
       }
 
       // 4. Arka Plan Senkronizasyonu
       else if (eventType === 'SYNC_REFRESH') {
         reloadFriendsAndRequests();
-      }
-
-      // 5. Çevrimiçi Varlık Durumu
-      else if (eventType === 'USER_STATUS') {
-        const uName = data.username.toLowerCase();
-        setFriends((prev) =>
-          prev.map((f) => (f.username.toLowerCase() === uName ? { ...f, ...data } : f))
-        );
-        if (activeFriend && activeFriend.username.toLowerCase() === uName) {
-          setActiveFriend((prev) => ({ ...prev, ...data }));
-        }
       }
     });
 
@@ -170,7 +169,7 @@ function MainApp() {
   const handleLogout = async () => {
     if (currentUser) {
       try {
-        await updateUserProfile(currentUser.username, { is_online: false, last_seen: new Date().toISOString() });
+        await updateUserProfile(currentUser.username, { is_online: false });
       } catch {}
     }
     setCurrentUser(null);
@@ -190,7 +189,7 @@ function MainApp() {
         <Sidebar
           currentUser={currentUser}
           friends={friends}
-          activeFriendId={activeFriend?.username}
+          activeFriendId={sanitizeUsername(activeFriend?.username)}
           onSelectFriend={(friend) => setActiveFriend(friend)}
           onOpenSearch={() => setIsSearchOpen(true)}
           onOpenRequests={() => setIsRequestsOpen(true)}
@@ -244,9 +243,7 @@ function MainApp() {
           isOpen={isRequestsOpen}
           onClose={() => setIsRequestsOpen(false)}
           requests={friendRequests}
-          onUpdated={() => {
-            reloadFriendsAndRequests();
-          }}
+          onUpdated={() => reloadFriendsAndRequests()}
         />
       )}
 

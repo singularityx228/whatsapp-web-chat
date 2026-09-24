@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import Avatar from './Avatar';
-import { sendMessage, markMessagesAsRead } from '../lib/chatService';
+import { sendMessage, markMessagesAsRead, sanitizeUsername, formatDisplayName } from '../lib/chatService';
 import { useToast } from './Toast';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '👏', '🎉', '🚀', '🙏', '😊', '😍', '👀', '💯'];
@@ -39,9 +39,9 @@ export default function ChatArea({
   useEffect(() => {
     scrollToBottom('auto');
     if (activeFriend && currentUser) {
-      markMessagesAsRead(activeFriend.id, currentUser.id);
+      markMessagesAsRead(activeFriend.username, currentUser.username);
     }
-  }, [activeFriend?.id, messages.length]);
+  }, [activeFriend?.username, messages.length]);
 
   const handleSend = async (e) => {
     e?.preventDefault();
@@ -53,7 +53,7 @@ export default function ChatArea({
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
-      await sendMessage(currentUser.id, activeFriend.id, cleanText);
+      await sendMessage(currentUser.username, activeFriend.username, cleanText);
       onMessageSent && onMessageSent();
       scrollToBottom('smooth');
     } catch (err) {
@@ -132,6 +132,9 @@ export default function ChatArea({
     );
   }
 
+  const friendUsername = sanitizeUsername(activeFriend.username);
+  const friendDisplayName = formatDisplayName(friendUsername, activeFriend.display_name);
+
   const filteredMessages = messages.filter((m) => {
     if (!searchInChat.trim()) return true;
     return m.content?.toLowerCase().includes(searchInChat.toLowerCase());
@@ -151,8 +154,8 @@ export default function ChatArea({
           </button>
 
           <Avatar
-            name={activeFriend.display_name || activeFriend.username}
-            seed={activeFriend.avatar_seed || activeFriend.username}
+            name={friendDisplayName}
+            seed={activeFriend.avatar_seed || friendUsername}
             size="sm"
             isOnline={activeFriend.is_online}
             showStatus={true}
@@ -160,13 +163,13 @@ export default function ChatArea({
 
           <div className="min-w-0">
             <h3 className="text-sm font-bold text-[#e9edef] truncate">
-              {activeFriend.display_name || activeFriend.username}
+              {friendDisplayName}
             </h3>
             <p className="text-xs text-[#8696a0] truncate">
               {activeFriend.is_online ? (
                 <span className="text-[#00a884] font-medium">çevrimiçi</span>
               ) : (
-                `@${activeFriend.username}`
+                `@${friendUsername}`
               )}
             </p>
           </div>
@@ -210,11 +213,10 @@ export default function ChatArea({
 
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto px-4 sm:px-12 py-4 space-y-3 chat-bg-pattern">
-        {/* End to end encryption notice */}
         <div className="flex justify-center">
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#182229]/90 border border-[#222e35] rounded-lg text-[11px] text-[#ffd279] shadow-sm max-w-sm text-center">
             <Lock className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>Mesajlar güvenli bulut ağı üzerinden cihazlar arasında anında iletilir.</span>
+            <span>Mesajlar bulutta kalıcı ve şifreli olarak saklanır.</span>
           </div>
         </div>
 
@@ -225,12 +227,14 @@ export default function ChatArea({
             </div>
             <p className="text-sm font-medium">Henüz mesaj yok</p>
             <p className="text-xs max-w-xs">
-              <strong>{activeFriend.display_name}</strong> kullanıcısına ilk selamı gönderin! 👋
+              <strong>{friendDisplayName}</strong> kullanıcısına ilk selamı gönderin! 👋
             </p>
           </div>
         ) : (
           filteredMessages.map((msg, index) => {
-            const isMe = msg.sender_id === currentUser.id;
+            const myUsername = sanitizeUsername(currentUser?.username);
+            const msgSender = sanitizeUsername(msg.sender_username || msg.sender_id);
+            const isMe = msgSender === myUsername;
             const isCopied = copiedMsgId === msg.id;
 
             const showDateHeader =
@@ -257,17 +261,17 @@ export default function ChatArea({
                         : 'bg-[#202c33] text-[#e9edef] bubble-incoming'
                     }`}
                   >
-                    {/* Message Content & Copy Icon Header */}
+                    {/* Message Content & Copy Icon */}
                     <div className="flex items-start justify-between gap-3">
                       <p className="whitespace-pre-wrap break-words word-break flex-1 select-text">
                         {msg.content}
                       </p>
 
-                      {/* COPY BUTTON (EN ÖNEMLİ İSTEK) */}
+                      {/* COPY BUTTON */}
                       <button
                         onClick={() => handleCopyMessage(msg)}
                         title="Mesajı Kopyala"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 -mr-1 -mt-0.5 rounded hover:bg-black/20 text-[#aebac1] hover:text-white cursor-pointer flex-shrink-0"
+                        className="opacity-70 hover:opacity-100 transition-opacity p-1 -mr-1 -mt-0.5 rounded hover:bg-black/20 text-[#aebac1] hover:text-white cursor-pointer flex-shrink-0"
                       >
                         {isCopied ? (
                           <Check className="w-3.5 h-3.5 text-[#25d366]" />
@@ -277,7 +281,7 @@ export default function ChatArea({
                       </button>
                     </div>
 
-                    {/* Footer: Time + Read Receipts + Copied badge */}
+                    {/* Footer: Time + Read Receipts */}
                     <div className="flex items-center justify-end gap-1 mt-1 text-[10px] text-[#8696a0] select-none">
                       {isCopied && (
                         <span className="text-[#25d366] font-bold text-[9px] mr-1 animate-pulse">

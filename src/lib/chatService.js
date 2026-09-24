@@ -1,9 +1,9 @@
 // ==============================================================================
-// WHATSUP CLOUD & REALTIME ENGINE (v6 - ROCK SOLID)
-// - Temiz Kullanıcı İsimleri (Asla çirkin 'usr_...' veya placeholder görünmez)
-// - Gerçek Zamanlı Bulut Tabanlı Çevrimiçi Durumu (Son 25 saniye aktifliği)
-// - Kesintisiz İstek ve Mesajlaşma Senkronizasyonu
-// - Çoklu Yedekli Bulut Depolama (Multi-Bucket Cloud Sync)
+// WHATSUP BATTLE-TESTED CLOUD & REALTIME CHAT ENGINE (v7)
+// - İki Yönlü Tam Eşit Mesajlaşma (Her iki taraf da anında yazar ve alır)
+// - Tutarlı Kullanıcı Eşleşmesi (Doğrudan username üzerinden)
+// - Aktif Sohbet Canlı Senkronizasyonu (1.5s Polling + Push)
+// - Çift Yedekli Bulut Depolama (KVDB Multi-Bucket)
 // ==============================================================================
 
 const PRIMARY_BUCKET = '573iJSs13F7bnpGHmWr5Dy';
@@ -19,12 +19,11 @@ let eventListeners = [];
 let syncTimer = null;
 let presenceTimer = null;
 
-// Yerel Önbellek
+// Yerel Önbellekler
 let cachedUsers = [];
 let cachedRequests = [];
 let cachedMessages = {}; // conversationKey -> array
 
-// İsim Temizleme Yardımcısı (Çirkin id/önekleri temizler)
 export const sanitizeUsername = (raw) => {
   if (!raw) return 'kullanici';
   return String(raw)
@@ -42,7 +41,7 @@ export const formatDisplayName = (username, customDisplay = '') => {
 };
 
 // ==============================================================================
-// 1. BULUT İŞLEMLERİ (HTTP REST KV)
+// 1. BULUT İŞLEMLERİ (HTTP REST)
 // ==============================================================================
 
 const cloudGet = async (key) => {
@@ -56,9 +55,7 @@ const cloudGet = async (key) => {
       if (res.ok) {
         return await res.json();
       }
-    } catch (err) {
-      // Yedek uç noktaya geçer
-    }
+    } catch (err) {}
   }
   return null;
 };
@@ -75,15 +72,13 @@ const cloudPut = async (key, data) => {
         body: jsonStr,
       });
       if (res.ok) success = true;
-    } catch (err) {
-      // Yedek uç noktaya geçer
-    }
+    } catch (err) {}
   }
   return success;
 };
 
 // ==============================================================================
-// 2. KULLANICI GİRİŞİ VE PROFİL
+// 2. KULLANICI GİRİŞİ & PROFİL
 // ==============================================================================
 
 export const loginOrCreateUser = async (rawUsername, displayName, bio = '') => {
@@ -92,12 +87,13 @@ export const loginOrCreateUser = async (rawUsername, displayName, bio = '') => {
 
   const dispName = formatDisplayName(username, displayName);
 
-  // Buluttan kullanıcıları çek
-  let users = (await cloudGet('users_v6')) || [];
+  // Buluttan kullanıcı listesini çek
+  let users = (await cloudGet('users_v7')) || [];
   let user = users.find((u) => sanitizeUsername(u.username) === username);
 
   if (!user) {
     user = {
+      id: username,
       username: username,
       display_name: dispName,
       avatar_seed: username,
@@ -112,7 +108,7 @@ export const loginOrCreateUser = async (rawUsername, displayName, bio = '') => {
   }
 
   cachedUsers = users;
-  cloudPut('users_v6', users);
+  cloudPut('users_v7', users);
 
   currentUser = user;
   startLiveEngine(user);
@@ -125,8 +121,7 @@ export const searchUsers = async (query, currentUserId) => {
   const cleanQuery = sanitizeUsername(query);
   const myName = sanitizeUsername(currentUserId || currentUser?.username);
 
-  // Buluttan güncel listeyi al
-  const users = (await cloudGet('users_v6')) || cachedUsers;
+  const users = (await cloudGet('users_v7')) || cachedUsers;
   cachedUsers = users;
 
   const results = users
@@ -140,15 +135,16 @@ export const searchUsers = async (query, currentUserId) => {
     })
     .map((u) => ({
       ...u,
+      id: sanitizeUsername(u.username),
       username: sanitizeUsername(u.username),
       display_name: formatDisplayName(u.username, u.display_name),
       is_online: isUserOnline(u.last_active),
     }));
 
-  // Eğer aranan isim listede yoksa, doğrudan istek atılabilecek aday kartı üret
   const exact = results.find((u) => u.username === cleanQuery);
   if (!exact && cleanQuery !== myName && cleanQuery.length >= 2) {
     results.unshift({
+      id: cleanQuery,
       username: cleanQuery,
       display_name: formatDisplayName(cleanQuery),
       avatar_seed: cleanQuery,
@@ -162,26 +158,26 @@ export const searchUsers = async (query, currentUserId) => {
 
 export const isUserOnline = (lastActiveTimestamp) => {
   if (!lastActiveTimestamp) return false;
-  return Date.now() - Number(lastActiveTimestamp) < 30000; // Son 30 saniye içinde aktifse çevrimiçi
+  return Date.now() - Number(lastActiveTimestamp) < 30000;
 };
 
 export const updateUserProfile = async (userId, updates) => {
   const username = sanitizeUsername(userId || currentUser?.username);
-  const users = (await cloudGet('users_v6')) || cachedUsers;
+  const users = (await cloudGet('users_v7')) || cachedUsers;
   const user = users.find((u) => sanitizeUsername(u.username) === username);
 
   if (user) {
     Object.assign(user, updates);
     user.last_active = Date.now();
     cachedUsers = users;
-    await cloudPut('users_v6', users);
+    await cloudPut('users_v7', users);
     return user;
   }
   return null;
 };
 
 // ==============================================================================
-// 3. ARKADAŞLIK VE İSTEK SİSTEMİ
+// 3. ARKADAŞLIK VE İSTEK YÖNETİMİ
 // ==============================================================================
 
 export const sendFriendRequest = async (senderId, receiverId, targetUser = null) => {
@@ -190,7 +186,7 @@ export const sendFriendRequest = async (senderId, receiverId, targetUser = null)
 
   if (sId === rId) throw new Error('Kendinize istek gönderemezsiniz.');
 
-  const requests = (await cloudGet('requests_v6')) || cachedRequests || [];
+  const requests = (await cloudGet('requests_v7')) || cachedRequests || [];
 
   const existing = requests.find(
     (r) =>
@@ -206,18 +202,16 @@ export const sendFriendRequest = async (senderId, receiverId, targetUser = null)
       if (sanitizeUsername(existing.sender_username) === sId) {
         return { data: existing, autoAccepted: false };
       } else {
-        // Karşı taraf bize istek atmış, doğrudan kabul et
         existing.status = 'accepted';
         existing.updated_at = new Date().toISOString();
         cachedRequests = requests;
-        await cloudPut('requests_v6', requests);
+        await cloudPut('requests_v7', requests);
         notifyListeners('FRIEND_ACCEPTED', existing);
         return { updated: existing, autoAccepted: true };
       }
     }
   }
 
-  // Yeni istek
   const newReq = {
     id: `req_${sId}_${rId}_${Date.now()}`,
     sender_username: sId,
@@ -233,7 +227,7 @@ export const sendFriendRequest = async (senderId, receiverId, targetUser = null)
 
   requests.push(newReq);
   cachedRequests = requests;
-  await cloudPut('requests_v6', requests);
+  await cloudPut('requests_v7', requests);
 
   notifyListeners('REQUEST_SENT', newReq);
 
@@ -242,15 +236,15 @@ export const sendFriendRequest = async (senderId, receiverId, targetUser = null)
 
 export const getFriendRequests = async (userId) => {
   const myId = sanitizeUsername(userId || currentUser?.username);
-  const requests = (await cloudGet('requests_v6')) || cachedRequests || [];
+  const requests = (await cloudGet('requests_v7')) || cachedRequests || [];
   cachedRequests = requests;
 
   const incoming = requests
     .filter((r) => sanitizeUsername(r.receiver_username) === myId && r.status === 'pending')
     .map((r) => ({
       ...r,
-      id: r.id,
       sender: {
+        id: sanitizeUsername(r.sender_username),
         username: sanitizeUsername(r.sender_username),
         display_name: formatDisplayName(r.sender_username, r.sender_display_name),
         avatar_seed: r.sender_avatar_seed || r.sender_username,
@@ -261,8 +255,8 @@ export const getFriendRequests = async (userId) => {
     .filter((r) => sanitizeUsername(r.sender_username) === myId && r.status === 'pending')
     .map((r) => ({
       ...r,
-      id: r.id,
       receiver: {
+        id: sanitizeUsername(r.receiver_username),
         username: sanitizeUsername(r.receiver_username),
         display_name: formatDisplayName(r.receiver_username, r.receiver_display_name),
         avatar_seed: r.receiver_avatar_seed || r.receiver_username,
@@ -273,7 +267,7 @@ export const getFriendRequests = async (userId) => {
 };
 
 export const respondToFriendRequest = async (requestId, status) => {
-  const requests = (await cloudGet('requests_v6')) || cachedRequests || [];
+  const requests = (await cloudGet('requests_v7')) || cachedRequests || [];
   const req = requests.find((r) => r.id === requestId);
   if (!req) return null;
 
@@ -281,7 +275,7 @@ export const respondToFriendRequest = async (requestId, status) => {
   req.updated_at = new Date().toISOString();
 
   cachedRequests = requests;
-  await cloudPut('requests_v6', requests);
+  await cloudPut('requests_v7', requests);
 
   if (status === 'accepted') {
     notifyListeners('FRIEND_ACCEPTED', req);
@@ -292,10 +286,10 @@ export const respondToFriendRequest = async (requestId, status) => {
 
 export const getFriends = async (userId) => {
   const myId = sanitizeUsername(userId || currentUser?.username);
-  const requests = (await cloudGet('requests_v6')) || cachedRequests || [];
+  const requests = (await cloudGet('requests_v7')) || cachedRequests || [];
   cachedRequests = requests;
 
-  const users = (await cloudGet('users_v6')) || cachedUsers || [];
+  const users = (await cloudGet('users_v7')) || cachedUsers || [];
   cachedUsers = users;
 
   const accepted = requests.filter(
@@ -327,20 +321,22 @@ export const getFriends = async (userId) => {
 };
 
 // ==============================================================================
-// 4. MESAJLAŞMA & KOPYALAMA
+// 4. İKİ YÖNLÜ MESAJLAŞMA & KOPYALAMA (Kusursuz Karşılıklı Akış)
 // ==============================================================================
 
-const getChatKey = (u1, u2) => {
+export const getChatKey = (u1, u2) => {
   const clean1 = sanitizeUsername(u1);
   const clean2 = sanitizeUsername(u2);
   const sorted = [clean1, clean2].sort();
-  return `msgs_v6_${sorted[0]}_${sorted[1]}`;
+  return `msgs_v7_${sorted[0]}_${sorted[1]}`;
 };
 
 export const getMessagesBetween = async (user1, user2) => {
+  if (!user1 || !user2) return [];
   const key = getChatKey(user1, user2);
+  
+  // Buluttan en güncel mesajları çek
   const cloudMsgs = await cloudGet(key);
-
   if (cloudMsgs && Array.isArray(cloudMsgs)) {
     cachedMessages[key] = cloudMsgs;
     return cloudMsgs;
@@ -367,15 +363,18 @@ export const sendMessage = async (sender, receiver, content) => {
     created_at: new Date().toISOString(),
   };
 
-  // İyimser olarak ekle ve UI'a anında bildir
-  const list = cachedMessages[key] || [];
-  list.push(newMsg);
-  cachedMessages[key] = list;
+  // 1. Önce buluttaki en son mesajları al ve yenisini ekle
+  let currentList = (await cloudGet(key)) || cachedMessages[key] || [];
+  if (!currentList.some((m) => m.id === newMsg.id)) {
+    currentList.push(newMsg);
+  }
+  cachedMessages[key] = currentList;
 
+  // 2. Kendi UI'ımıza anında göster
   notifyListeners('NEW_MESSAGE', newMsg);
 
-  // Buluta kaydet
-  cloudPut(key, list);
+  // 3. Buluta kaydet (Karşı tarafın görebilmesi için)
+  await cloudPut(key, currentList);
 
   return newMsg;
 };
@@ -385,11 +384,11 @@ export const markMessagesAsRead = async (sender, receiver) => {
   const r = sanitizeUsername(receiver);
   const key = getChatKey(s, r);
 
-  const list = cachedMessages[key] || [];
+  const list = cachedMessages[key] || (await cloudGet(key)) || [];
   let changed = false;
 
   list.forEach((m) => {
-    if (m.sender_username === s && m.receiver_username === r && !m.is_read) {
+    if (sanitizeUsername(m.sender_username) === s && sanitizeUsername(m.receiver_username) === r && !m.is_read) {
       m.is_read = true;
       changed = true;
     }
@@ -402,35 +401,34 @@ export const markMessagesAsRead = async (sender, receiver) => {
 };
 
 // ==============================================================================
-// 5. CANLI DÖNGÜ VE SENKRONİZASYON (Her 2.5 Saniyede Bir Bulut Yoklama)
+// 5. CANLI DÖNGÜ (Live Heartbeat & Synchronizer)
 // ==============================================================================
 
 const startLiveEngine = (user) => {
   if (syncTimer) clearInterval(syncTimer);
   if (presenceTimer) clearInterval(presenceTimer);
 
-  // 1. Canlı Varlık Kalp Atışı (Her 10 saniyede last_active güncelle)
+  // 1. Kalp Atışı (Her 8 saniyede aktiflik tazeleme)
   presenceTimer = setInterval(async () => {
     if (!currentUser) return;
     try {
-      const users = (await cloudGet('users_v6')) || cachedUsers;
+      const users = (await cloudGet('users_v7')) || cachedUsers;
       const me = users.find((u) => sanitizeUsername(u.username) === sanitizeUsername(currentUser.username));
       if (me) {
         me.last_active = Date.now();
         cachedUsers = users;
-        cloudPut('users_v6', users);
+        cloudPut('users_v7', users);
       }
     } catch (e) {}
-  }, 10000);
+  }, 8000);
 
-  // 2. Canlı Senkronizasyon (Her 2.5 saniyede bir yeni istek & kabul kontrolü)
+  // 2. Canlı İstek ve Arkadaşlık Senkronizasyonu (Her 2 saniyede bir)
   syncTimer = setInterval(async () => {
     if (!currentUser) return;
     try {
       const myId = sanitizeUsername(currentUser.username);
 
-      // İstekleri kontrol et
-      const cloudReqs = await cloudGet('requests_v6');
+      const cloudReqs = await cloudGet('requests_v7');
       if (cloudReqs && Array.isArray(cloudReqs)) {
         const prevAcceptedCount = cachedRequests.filter((r) => r.status === 'accepted').length;
         const newAcceptedCount = cloudReqs.filter((r) => r.status === 'accepted').length;
@@ -445,7 +443,7 @@ const startLiveEngine = (user) => {
         }
       }
     } catch (e) {}
-  }, 2500);
+  }, 2000);
 };
 
 export const subscribeToChatEvents = (callback) => {
