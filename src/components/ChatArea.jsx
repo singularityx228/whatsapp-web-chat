@@ -6,17 +6,12 @@ import {
   Check,
   CheckCheck,
   ArrowLeft,
-  MoreVertical,
   Search,
-  Phone,
-  Video,
   Lock,
-  Paperclip,
-  Mic,
   Sparkles,
 } from 'lucide-react';
 import Avatar from './Avatar';
-import { sendMessage, markMessagesAsRead } from '../lib/supabaseClient';
+import { sendMessage, markMessagesAsRead } from '../lib/chatService';
 import { useToast } from './Toast';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '👏', '🎉', '🚀', '🙏', '😊', '😍', '👀', '💯'];
@@ -37,7 +32,6 @@ export default function ChatArea({
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // Otomatik aşağı kaydırma
   const scrollToBottom = (behavior = 'smooth') => {
     messagesEndRef.current?.scrollIntoView({ behavior });
   };
@@ -64,7 +58,7 @@ export default function ChatArea({
       scrollToBottom('smooth');
     } catch (err) {
       showError(err.message || 'Mesaj gönderilemedi.');
-      setInputText(cleanText); // Geri yükle
+      setInputText(cleanText);
     }
   };
 
@@ -93,7 +87,6 @@ export default function ChatArea({
     textareaRef.current?.focus();
   };
 
-  // Tarih gruplama formatlayıcı
   const formatTime = (isoString) => {
     try {
       const d = new Date(isoString);
@@ -139,7 +132,6 @@ export default function ChatArea({
     );
   }
 
-  // Arama filtresi
   const filteredMessages = messages.filter((m) => {
     if (!searchInChat.trim()) return true;
     return m.content?.toLowerCase().includes(searchInChat.toLowerCase());
@@ -150,7 +142,6 @@ export default function ChatArea({
       {/* Top Header */}
       <div className="flex items-center justify-between px-4 py-2.5 bg-[#202c33] border-b border-[#2a3942] z-10 select-none">
         <div className="flex items-center gap-3 min-w-0">
-          {/* Mobile Back Button */}
           <button
             onClick={onBack}
             className="md:hidden p-1.5 -ml-1 text-[#aebac1] hover:text-white rounded-lg cursor-pointer"
@@ -181,7 +172,6 @@ export default function ChatArea({
           </div>
         </div>
 
-        {/* Header Action Buttons */}
         <div className="flex items-center gap-1 text-[#aebac1]">
           <button
             onClick={() => setShowSearchBox(!showSearchBox)}
@@ -224,7 +214,7 @@ export default function ChatArea({
         <div className="flex justify-center">
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#182229]/90 border border-[#222e35] rounded-lg text-[11px] text-[#ffd279] shadow-sm max-w-sm text-center">
             <Lock className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>Mesajlar Supabase gerçek zamanlı sunucusu üzerinden anında iletilir.</span>
+            <span>Mesajlar güvenli bulut ağı üzerinden cihazlar arasında anında iletilir.</span>
           </div>
         </div>
 
@@ -243,7 +233,6 @@ export default function ChatArea({
             const isMe = msg.sender_id === currentUser.id;
             const isCopied = copiedMsgId === msg.id;
 
-            // Gün ayracı
             const showDateHeader =
               index === 0 ||
               new Date(messages[index - 1].created_at).toDateString() !==
@@ -335,7 +324,6 @@ export default function ChatArea({
         onSubmit={handleSend}
         className="flex items-end gap-2 px-3 sm:px-4 py-2.5 bg-[#202c33] border-t border-[#2a3942] select-none"
       >
-        {/* Emoji Button */}
         <button
           type="button"
           onClick={() => setShowEmojiBar(!showEmojiBar)}
@@ -347,7 +335,6 @@ export default function ChatArea({
           <Smile className="w-6 h-6" />
         </button>
 
-        {/* Text Input */}
         <div className="flex-1 bg-[#2a3942] rounded-2xl px-4 py-2 border border-transparent focus-within:border-[#00a884]/50 transition-colors">
           <textarea
             ref={textareaRef}
@@ -364,7 +351,6 @@ export default function ChatArea({
           />
         </div>
 
-        {/* Send Button */}
         {inputText.trim() ? (
           <button
             type="submit"

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, UserPlus, Check, Clock, X, UserCheck, Sparkles, Loader2 } from 'lucide-react';
 import Avatar from './Avatar';
-import { searchUsers, sendFriendRequest } from '../lib/supabaseClient';
+import { searchUsers, sendFriendRequest } from '../lib/chatService';
 import { useToast } from './Toast';
 
 export default function UserSearchModal({ isOpen, onClose, currentUser, friends = [], onFriendRequestSent }) {
@@ -18,7 +18,7 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
     }
   }, [isOpen]);
 
-  // Debounced Arama
+  // Arama Tetikleme
   useEffect(() => {
     if (!query.trim() || query.length < 2) {
       setResults([]);
@@ -28,24 +28,24 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
     const timer = setTimeout(async () => {
       try {
         setLoading(true);
-        const data = await searchUsers(query, currentUser.id);
+        const data = await searchUsers(query, currentUser?.id);
         setResults(data);
       } catch (err) {
         console.error('Search error:', err);
       } finally {
         setLoading(false);
       }
-    }, 250);
+    }, 150);
 
     return () => clearTimeout(timer);
-  }, [query, currentUser.id]);
+  }, [query, currentUser?.id]);
 
   if (!isOpen) return null;
 
   const handleSendRequest = async (user) => {
     try {
       setRequestStatusMap((prev) => ({ ...prev, [user.id]: 'loading' }));
-      const res = await sendFriendRequest(currentUser.id, user.id);
+      const res = await sendFriendRequest(currentUser.id, user.id, user);
       
       if (res.autoAccepted) {
         showSuccess(`${user.display_name} ile arkadaş oldunuz! 🎉`);
@@ -62,8 +62,12 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
     }
   };
 
-  const isAlreadyFriend = (userId) => {
-    return friends.some((f) => f.id === userId);
+  const isAlreadyFriend = (userId, username) => {
+    return friends.some(
+      (f) =>
+        f.id === userId ||
+        f.username?.toLowerCase() === username?.toLowerCase()
+    );
   };
 
   return (
@@ -73,7 +77,7 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
         <div className="flex items-center justify-between px-6 py-4 bg-[#202c33] border-b border-[#2a3942]">
           <div className="flex items-center gap-2">
             <UserPlus className="w-5 h-5 text-[#00a884]" />
-            <h3 className="font-semibold text-base">Yeni Sohbet / Kullanıcı Ara</h3>
+            <h3 className="font-semibold text-base">Kullanıcı Bul ve İstek Gönder</h3>
           </div>
           <button
             onClick={onClose}
@@ -89,11 +93,11 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8696a0]" />
             <input
               type="text"
-              placeholder="Kullanıcı adı veya isim ile ara..."
+              placeholder="Arkadaşının kullanıcı adını yaz (örn: ahmet)"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => setQuery(e.target.value.toLowerCase())}
               autoFocus
-              className="w-full pl-10 pr-4 py-2.5 bg-[#202c33] border border-[#2a3942] rounded-xl text-white text-sm focus:outline-none focus:border-[#00a884] placeholder:text-gray-500 transition-colors"
+              className="w-full pl-10 pr-4 py-2.5 bg-[#202c33] border border-[#2a3942] rounded-xl text-white text-sm focus:outline-none focus:border-[#00a884] placeholder:text-gray-500 transition-colors font-mono"
             />
             {loading && (
               <Loader2 className="w-4 h-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-[#00a884] animate-spin" />
@@ -107,7 +111,7 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
             <div className="text-center py-10 text-[#8696a0]">
               <Sparkles className="w-8 h-8 mx-auto mb-2 text-[#00a884]/60" />
               <p className="text-sm font-medium">Eklemek istediğiniz kişinin kullanıcı adını yazın</p>
-              <p className="text-xs text-[#8696a0]/70 mt-1">İstek gönderip kabul edildiğinde hemen mesajlaşabilirsiniz</p>
+              <p className="text-xs text-[#8696a0]/70 mt-1">İstek gönderip kabul edildiğinde anında mesajlaşabilirsiniz</p>
             </div>
           )}
 
@@ -118,7 +122,7 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
           )}
 
           {results.map((user) => {
-            const alreadyFriend = isAlreadyFriend(user.id);
+            const alreadyFriend = isAlreadyFriend(user.id, user.username);
             const status = requestStatusMap[user.id];
 
             return (
@@ -136,7 +140,7 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
                   />
                   <div className="min-w-0">
                     <h4 className="text-sm font-semibold text-[#e9edef] truncate">
-                      {user.display_name}
+                      {user.display_name || user.username}
                     </h4>
                     <p className="text-xs text-[#8696a0] font-mono truncate">
                       @{user.username}

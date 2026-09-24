@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { UserCheck, UserX, Check, X, Bell, Clock, Inbox, Send, Loader2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import Avatar from './Avatar';
-import { respondToFriendRequest } from '../lib/supabaseClient';
+import { respondToFriendRequest } from '../lib/chatService';
 import { useToast } from './Toast';
 
 export default function FriendRequestsModal({
@@ -12,7 +12,7 @@ export default function FriendRequestsModal({
   onUpdated,
 }) {
   const { showSuccess, showError } = useToast();
-  const [tab, setTab] = useState('incoming'); // 'incoming' | 'outgoing'
+  const [tab, setTab] = useState('incoming');
   const [loadingMap, setLoadingMap] = useState({});
 
   if (!isOpen) return null;

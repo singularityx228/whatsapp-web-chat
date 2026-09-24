@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, AtSign, FileText, Check, X, LogOut, Sparkles, Loader2 } from 'lucide-react';
 import Avatar from './Avatar';
-import { updateUserProfile } from '../lib/supabaseClient';
+import { updateUserProfile } from '../lib/chatService';
 import { useToast } from './Toast';
 
 const PRESET_AVATARS = ['Felix', 'Luna', 'Nova', 'Leo', 'Milo', 'Zara', 'Oliver', 'Bella', 'Gizmo', 'Sammy', 'Casper', 'Pepper'];
@@ -31,7 +31,7 @@ export default function UserProfileModal({ isOpen, onClose, currentUser, onUserU
       });
 
       showSuccess('Profiliniz güncellendi! ✨');
-      onUserUpdated && onUserUpdated(updated);
+      onUserUpdated && onUserUpdated(updated || { ...currentUser, display_name: displayName.trim(), bio: bio.trim(), avatar_seed: avatarSeed });
       onClose();
     } catch (err) {
       showError(err.message || 'Profil güncellenemedi.');
@@ -47,7 +47,7 @@ export default function UserProfileModal({ isOpen, onClose, currentUser, onUserU
         <div className="flex items-center justify-between px-6 py-4 bg-[#202c33] border-b border-[#2a3942]">
           <div className="flex items-center gap-2">
             <User className="w-5 h-5 text-[#00a884]" />
-            <h3 className="font-semibold text-base">Profilim & Ayarlar</h3>
+            <h3 className="font-semibold text-base">Profilim & Bilgilerim</h3>
           </div>
           <button
             onClick={onClose}

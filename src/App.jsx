@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ToastProvider, useToast } from './components/Toast';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
@@ -7,13 +7,13 @@ import UserSearchModal from './components/UserSearchModal';
 import FriendRequestsModal from './components/FriendRequestsModal';
 import UserProfileModal from './components/UserProfileModal';
 import {
-  getSupabase,
+  initRealtimeCloud,
   getFriends,
   getFriendRequests,
   getMessagesBetween,
   updateUserProfile,
-  subscribeToGlobalEvents,
-} from './lib/supabaseClient';
+  subscribeToChatEvents,
+} from './lib/chatService';
 
 function MainApp() {
   const { showSuccess, showError, showInfo } = useToast();
@@ -40,9 +40,6 @@ function MainApp() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-
-  // Realtime ref
-  const channelRef = useRef(null);
 
   // Verileri yenileme
   const reloadFriendsAndRequests = useCallback(async () => {
@@ -76,6 +73,7 @@ function MainApp() {
     if (currentUser) {
       localStorage.setItem('whatsup_current_user', JSON.stringify(currentUser));
       setIsAuthOpen(false);
+      initRealtimeCloud(currentUser);
       reloadFriendsAndRequests();
     } else {
       localStorage.removeItem('whatsup_current_user');
@@ -93,16 +91,13 @@ function MainApp() {
     }
   }, [activeFriend, loadActiveMessages]);
 
-  // Gerçek Zamanlı Dinleyici (Broadcast & Supabase)
+  // Gerçek Zamanlı Bulut Dinleyicisi
   useEffect(() => {
     if (!currentUser) return;
 
-    // 1. Yerel / Cihazlar arası Broadcast listener
-    const unsubscribeBroadcast = subscribeToGlobalEvents((event) => {
-      if (!event) return;
-
-      if (event.type === 'NEW_MESSAGE') {
-        const msg = event.message;
+    const unsubscribe = subscribeToChatEvents((eventType, data) => {
+      if (eventType === 'NEW_MESSAGE') {
+        const msg = data;
         if (
           (msg.sender_id === currentUser.id && msg.receiver_id === activeFriend?.id) ||
           (msg.sender_id === activeFriend?.id && msg.receiver_id === currentUser.id)
@@ -120,62 +115,23 @@ function MainApp() {
           }));
           showInfo('Yeni bir mesajınız var 💬');
         }
-      } else if (event.type === 'NEW_REQUEST' || event.type === 'REQUEST_UPDATED') {
+      } else if (eventType === 'NEW_FRIEND_REQUEST') {
         reloadFriendsAndRequests();
-        if (event.type === 'NEW_REQUEST' && event.request?.receiver_id === currentUser.id) {
-          showInfo('Yeni bir sohbet isteğiniz var! 🔔');
-        }
+        showInfo('Yeni bir sohbet isteğiniz var! 🔔');
+      } else if (eventType === 'FRIEND_REQUEST_ACCEPTED') {
+        reloadFriendsAndRequests();
+        showSuccess('Sohbet isteğiniz kabul edildi! 🎉');
+      } else if (eventType === 'USER_STATUS') {
+        setFriends((prev) =>
+          prev.map((f) => (f.id === data.id || f.username === data.username ? { ...f, ...data } : f))
+        );
       }
     });
 
-    // 2. Supabase Realtime Subscription (eğer bağlıysa)
-    const supabase = getSupabase();
-    if (supabase) {
-      try {
-        if (channelRef.current) supabase.removeChannel(channelRef.current);
-
-        const channel = supabase
-          .channel('whatsup-global-channel')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-            const newMsg = payload.new;
-            if (!newMsg) return;
-
-            if (
-              (newMsg.sender_id === currentUser.id && newMsg.receiver_id === activeFriend?.id) ||
-              (newMsg.sender_id === activeFriend?.id && newMsg.receiver_id === currentUser.id)
-            ) {
-              setMessages((prev) => (prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg]));
-            }
-
-            const otherId = newMsg.sender_id === currentUser.id ? newMsg.receiver_id : newMsg.sender_id;
-            setLastMessagesMap((prev) => ({ ...prev, [otherId]: newMsg }));
-
-            if (newMsg.receiver_id === currentUser.id && newMsg.sender_id !== activeFriend?.id) {
-              setUnreadCountMap((prev) => ({
-                ...prev,
-                [newMsg.sender_id]: (prev[newMsg.sender_id] || 0) + 1,
-              }));
-              showInfo('Yeni bir mesajınız var 💬');
-            }
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, () => {
-            reloadFriendsAndRequests();
-          })
-          .subscribe();
-
-        channelRef.current = channel;
-      } catch (e) {
-        console.warn('Realtime subscription fallback:', e);
-      }
-    }
-
     return () => {
-      unsubscribeBroadcast();
-      if (channelRef.current && supabase) {
-        supabase.removeChannel(channelRef.current);
-      }
+      unsubscribe();
     };
-  }, [currentUser, activeFriend, reloadFriendsAndRequests, showInfo]);
+  }, [currentUser, activeFriend, reloadFriendsAndRequests, showInfo, showSuccess]);
 
   // Çıkış yapma
   const handleLogout = async () => {
@@ -227,7 +183,7 @@ function MainApp() {
         />
       </div>
 
-      {/* Modals */}
+      {/* Modallar */}
       {isAuthOpen && (
         <AuthModal
           onLoginSuccess={(user) => {
