@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { ToastProvider, useToast } from './components/Toast';
 import Sidebar from './components/Sidebar';
@@ -8,7 +8,7 @@ import UserSearchModal from './components/UserSearchModal';
 import FriendRequestsModal from './components/FriendRequestsModal';
 import UserProfileModal from './components/UserProfileModal';
 import {
-  initRealtimeCloud,
+  loginOrCreateUser,
   getFriends,
   getFriendRequests,
   getMessagesBetween,
@@ -74,7 +74,6 @@ function MainApp() {
     if (currentUser) {
       localStorage.setItem('whatsup_current_user', JSON.stringify(currentUser));
       setIsAuthOpen(false);
-      initRealtimeCloud(currentUser);
       reloadFriendsAndRequests();
     } else {
       localStorage.removeItem('whatsup_current_user');
@@ -99,7 +98,7 @@ function MainApp() {
     const unsubscribe = subscribeToChatEvents((eventType, data) => {
       const myName = currentUser.username.toLowerCase();
 
-      // 1. Yeni Mesaj (Gönderilen veya Alınan)
+      // 1. Yeni Mesaj
       if (eventType === 'NEW_MESSAGE') {
         const msg = data;
         const sId = (msg.sender_id || msg.sender_username || '').toLowerCase();
@@ -138,14 +137,19 @@ function MainApp() {
       else if (eventType === 'FRIEND_ACCEPTED') {
         reloadFriendsAndRequests();
         confetti({
-          particleCount: 70,
-          spread: 60,
-          origin: { y: 0.7 },
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.65 },
         });
         showSuccess('Sohbet isteğiniz kabul edildi! Hemen mesajlaşabilirsiniz 🎉');
       }
 
-      // 4. Çevrimiçi Varlık Durumu
+      // 4. Arka Plan Senkronizasyonu
+      else if (eventType === 'SYNC_REFRESH') {
+        reloadFriendsAndRequests();
+      }
+
+      // 5. Çevrimiçi Varlık Durumu
       else if (eventType === 'USER_STATUS') {
         const uName = data.username.toLowerCase();
         setFriends((prev) =>
