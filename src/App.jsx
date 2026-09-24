@@ -7,6 +7,7 @@ import AuthModal from './components/AuthModal';
 import UserSearchModal from './components/UserSearchModal';
 import FriendRequestsModal from './components/FriendRequestsModal';
 import UserProfileModal from './components/UserProfileModal';
+import InstallAppModal from './components/InstallAppModal';
 import {
   getFriends,
   getFriendRequests,
@@ -35,12 +36,38 @@ function MainApp() {
   const [messages, setMessages] = useState([]);
   const [lastMessagesMap, setLastMessagesMap] = useState({});
   const [unreadCountMap, setUnreadCountMap] = useState({});
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
 
   // Modals
   const [isAuthOpen, setIsAuthOpen] = useState(!currentUser);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isInstallOpen, setIsInstallOpen] = useState(false);
+
+  // PWA Install Prompt Yakalayıcı
+  useEffect(() => {
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        showSuccess('Whatsup uygulaması başarıyla yüklendi! 🎉');
+        setDeferredPrompt(null);
+      }
+    } else {
+      setIsInstallOpen(true);
+    }
+  };
 
   // Verileri yenileme
   const reloadFriendsAndRequests = useCallback(async () => {
@@ -138,7 +165,7 @@ function MainApp() {
         }
       }
 
-      // 2. Yeni Arkadaşlık İsteği
+      // 2. Yeni İstek
       else if (eventType === 'NEW_FRIEND_REQUEST' || eventType === 'REQUEST_SENT') {
         reloadFriendsAndRequests();
       }
@@ -154,7 +181,12 @@ function MainApp() {
         showSuccess('Sohbet isteği onaylandı! 🎉');
       }
 
-      // 4. Arka Plan Senkronizasyonu
+      // 4. Sohbet Temizlendi
+      else if (eventType === 'CHAT_CLEARED') {
+        loadActiveMessages();
+      }
+
+      // 5. Arka Plan Senkronizasyonu
       else if (eventType === 'SYNC_REFRESH') {
         reloadFriendsAndRequests();
       }
@@ -163,7 +195,7 @@ function MainApp() {
     return () => {
       unsubscribe();
     };
-  }, [currentUser, activeFriend, reloadFriendsAndRequests, showInfo, showSuccess]);
+  }, [currentUser, activeFriend, reloadFriendsAndRequests, loadActiveMessages, showInfo, showSuccess]);
 
   // Çıkış yapma
   const handleLogout = async () => {
@@ -194,6 +226,7 @@ function MainApp() {
           onOpenSearch={() => setIsSearchOpen(true)}
           onOpenRequests={() => setIsRequestsOpen(true)}
           onOpenProfile={() => setIsProfileOpen(true)}
+          onOpenInstall={handleInstallClick}
           pendingRequestsCount={friendRequests.incoming?.length || 0}
           lastMessagesMap={lastMessagesMap}
           unreadCountMap={unreadCountMap}
@@ -214,6 +247,9 @@ function MainApp() {
           onMessageSent={() => {
             loadActiveMessages();
             reloadFriendsAndRequests();
+          }}
+          onChatCleared={() => {
+            loadActiveMessages();
           }}
         />
       </div>
@@ -243,7 +279,9 @@ function MainApp() {
           isOpen={isRequestsOpen}
           onClose={() => setIsRequestsOpen(false)}
           requests={friendRequests}
-          onUpdated={() => reloadFriendsAndRequests()}
+          onUpdated={() => {
+            reloadFriendsAndRequests();
+          }}
         />
       )}
 
@@ -254,6 +292,15 @@ function MainApp() {
           currentUser={currentUser}
           onUserUpdated={(updated) => setCurrentUser(updated)}
           onLogout={handleLogout}
+        />
+      )}
+
+      {isInstallOpen && (
+        <InstallAppModal
+          isOpen={isInstallOpen}
+          onClose={() => setIsInstallOpen(false)}
+          deferredPrompt={deferredPrompt}
+          onInstallPrompt={handleInstallClick}
         />
       )}
     </div>

@@ -6,8 +6,12 @@ import {
   UserPlus,
   User,
   CheckCheck,
+  Download,
+  Lock,
+  Sparkles,
 } from 'lucide-react';
 import Avatar from './Avatar';
+import { sanitizeUsername, formatDisplayName } from '../lib/chatService';
 
 export default function Sidebar({
   currentUser,
@@ -17,19 +21,22 @@ export default function Sidebar({
   onOpenSearch,
   onOpenRequests,
   onOpenProfile,
+  onOpenInstall,
   pendingRequestsCount = 0,
   lastMessagesMap = {},
   unreadCountMap = {},
 }) {
   const [filterQuery, setFilterQuery] = useState('');
 
+  const myUsername = sanitizeUsername(currentUser?.username);
+  const myDisplayName = formatDisplayName(myUsername, currentUser?.display_name);
+
   const filteredFriends = friends.filter((friend) => {
     if (!filterQuery.trim()) return true;
     const q = filterQuery.toLowerCase();
-    return (
-      friend.display_name?.toLowerCase().includes(q) ||
-      friend.username?.toLowerCase().includes(q)
-    );
+    const fUser = sanitizeUsername(friend.username);
+    const fName = formatDisplayName(fUser, friend.display_name).toLowerCase();
+    return fName.includes(q) || fUser.includes(q);
   });
 
   const formatMessageTime = (dateStr) => {
@@ -58,29 +65,39 @@ export default function Sidebar({
           title="Profili Düzenle"
         >
           <Avatar
-            name={currentUser?.display_name || currentUser?.username}
-            seed={currentUser?.avatar_seed || currentUser?.username}
+            name={myDisplayName}
+            seed={currentUser?.avatar_seed || myUsername}
             size="sm"
             isOnline={true}
             showStatus={true}
           />
           <div className="hidden sm:block min-w-0">
             <h3 className="text-sm font-bold text-[#e9edef] truncate group-hover:text-[#00a884] transition-colors">
-              {currentUser?.display_name}
+              {myDisplayName}
             </h3>
-            <p className="text-[11px] text-[#8696a0] font-mono truncate">
-              @{currentUser?.username}
+            <p className="text-[11px] text-[#00a884] font-mono truncate font-medium">
+              @{myUsername}
             </p>
           </div>
         </button>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-1">
+          {/* UYGULAMAYI İNDİR / MASAÜSTÜ YÜKLE BUTONU */}
+          <button
+            onClick={onOpenInstall}
+            title="Masaüstü / Mobil Uygulamasını İndir"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#00a884]/20 hover:bg-[#00a884]/30 text-[#00a884] rounded-full text-xs font-bold transition-all cursor-pointer border border-[#00a884]/40"
+          >
+            <Download className="w-4 h-4 animate-bounce" />
+            <span className="hidden sm:inline">Uygulamayı İndir</span>
+          </button>
+
           {/* Add User / Search */}
           <button
             onClick={onOpenSearch}
             title="Kullanıcı Bul ve Ekle"
-            className="p-2.5 text-[#aebac1] hover:text-[#00a884] hover:bg-[#2a3942] rounded-full transition-colors relative cursor-pointer"
+            className="p-2 text-[#aebac1] hover:text-[#00a884] hover:bg-[#2a3942] rounded-full transition-colors relative cursor-pointer"
           >
             <UserPlus className="w-5 h-5" />
           </button>
@@ -89,11 +106,11 @@ export default function Sidebar({
           <button
             onClick={onOpenRequests}
             title="Sohbet İstekleri"
-            className="p-2.5 text-[#aebac1] hover:text-[#00a884] hover:bg-[#2a3942] rounded-full transition-colors relative cursor-pointer"
+            className="p-2 text-[#aebac1] hover:text-[#00a884] hover:bg-[#2a3942] rounded-full transition-colors relative cursor-pointer"
           >
             <Bell className="w-5 h-5" />
             {pendingRequestsCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] px-1 bg-[#00a884] text-[#111b21] rounded-full text-[10px] font-extrabold flex items-center justify-center animate-pulse">
+              <span className="absolute top-1 right-1 min-w-[18px] h-[18px] px-1 bg-[#00a884] text-[#111b21] rounded-full text-[10px] font-extrabold flex items-center justify-center animate-pulse">
                 {pendingRequestsCount}
               </span>
             )}
@@ -103,7 +120,7 @@ export default function Sidebar({
           <button
             onClick={onOpenProfile}
             title="Profilim"
-            className="p-2.5 text-[#aebac1] hover:text-[#00a884] hover:bg-[#2a3942] rounded-full transition-colors cursor-pointer"
+            className="p-2 text-[#aebac1] hover:text-[#00a884] hover:bg-[#2a3942] rounded-full transition-colors cursor-pointer"
           >
             <User className="w-5 h-5" />
           </button>
@@ -150,14 +167,16 @@ export default function Sidebar({
           </div>
         ) : (
           filteredFriends.map((friend) => {
-            const isActive = activeFriendId === friend.id;
-            const lastMsg = lastMessagesMap[friend.id];
-            const unread = unreadCountMap[friend.id] || 0;
-            const isLastMsgMine = lastMsg?.sender_id === currentUser?.id;
+            const fUser = sanitizeUsername(friend.username);
+            const fName = formatDisplayName(fUser, friend.display_name);
+            const isActive = activeFriendId === fUser;
+            const lastMsg = lastMessagesMap[fUser];
+            const unread = unreadCountMap[fUser] || 0;
+            const isLastMsgMine = sanitizeUsername(lastMsg?.sender_username || lastMsg?.sender_id) === myUsername;
 
             return (
               <div
-                key={friend.id}
+                key={fUser}
                 onClick={() => onSelectFriend(friend)}
                 className={`flex items-center gap-3.5 px-3.5 py-3 cursor-pointer transition-colors ${
                   isActive
@@ -166,8 +185,8 @@ export default function Sidebar({
                 }`}
               >
                 <Avatar
-                  name={friend.display_name || friend.username}
-                  seed={friend.avatar_seed || friend.username}
+                  name={fName}
+                  seed={friend.avatar_seed || fUser}
                   size="md"
                   isOnline={friend.is_online}
                   showStatus={true}
@@ -176,7 +195,7 @@ export default function Sidebar({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1">
                     <h4 className="text-sm font-semibold text-[#e9edef] truncate">
-                      {friend.display_name || friend.username}
+                      {fName}
                     </h4>
                     {lastMsg?.created_at && (
                       <span className={`text-[11px] flex-shrink-0 ${unread > 0 ? 'text-[#00a884] font-bold' : 'text-[#8696a0]'}`}>
@@ -191,7 +210,7 @@ export default function Sidebar({
                         <CheckCheck className={`w-3.5 h-3.5 flex-shrink-0 ${lastMsg?.is_read ? 'text-[#53bdeb]' : 'text-[#8696a0]'}`} />
                       )}
                       <span className="truncate">
-                        {lastMsg ? lastMsg.content : `@${friend.username}`}
+                        {lastMsg ? lastMsg.content : `@${fUser}`}
                       </span>
                     </div>
 
