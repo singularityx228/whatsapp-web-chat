@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UserCheck, UserX, Check, X, Bell, Clock, Inbox, Send, Loader2 } from 'lucide-react';
+import { UserCheck, Check, X, Bell, Clock, Inbox, Send, Loader2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import Avatar from './Avatar';
 import { respondToFriendRequest } from '../lib/chatService';
@@ -70,7 +70,7 @@ export default function FriendRequestsModal({
         <div className="flex border-b border-[#222e35] bg-[#182229]">
           <button
             onClick={() => setTab('incoming')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 ${
+            className={`flex-1 flex items-center justify-center gap-2 py-3 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 cursor-pointer ${
               tab === 'incoming'
                 ? 'border-[#00a884] text-[#00a884] bg-[#202c33]/50'
                 : 'border-transparent text-[#8696a0] hover:text-gray-200'
@@ -87,7 +87,7 @@ export default function FriendRequestsModal({
 
           <button
             onClick={() => setTab('outgoing')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 ${
+            className={`flex-1 flex items-center justify-center gap-2 py-3 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 cursor-pointer ${
               tab === 'outgoing'
                 ? 'border-[#00a884] text-[#00a884] bg-[#202c33]/50'
                 : 'border-transparent text-[#8696a0] hover:text-gray-200'
@@ -118,6 +118,8 @@ export default function FriendRequestsModal({
               ) : (
                 requests.incoming.map((req) => {
                   const sender = req.sender || {};
+                  const displayName = sender.display_name || sender.username || 'Kullanıcı';
+                  const username = sender.username || 'kullanici';
                   const isLoading = loadingMap[req.id];
 
                   return (
@@ -127,28 +129,26 @@ export default function FriendRequestsModal({
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <Avatar
-                          name={sender.display_name || sender.username}
-                          seed={sender.avatar_seed || sender.username}
+                          name={displayName}
+                          seed={sender.avatar_seed || username}
                           size="md"
                         />
                         <div className="min-w-0">
                           <h4 className="text-sm font-bold text-[#e9edef] truncate">
-                            {sender.display_name || sender.username}
+                            {displayName}
                           </h4>
-                          <p className="text-xs text-[#8696a0] font-mono truncate">
-                            @{sender.username}
+                          <p className="text-xs text-[#00a884] font-mono truncate">
+                            @{username}
                           </p>
-                          {sender.bio && (
-                            <p className="text-[11px] text-[#8696a0]/80 truncate mt-0.5">
-                              {sender.bio}
-                            </p>
-                          )}
+                          <p className="text-[11px] text-[#8696a0] truncate mt-0.5">
+                            Sizinle sohbet başlatmak istiyor
+                          </p>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <button
-                          onClick={() => handleRespond(req.id, 'rejected', sender.display_name)}
+                          onClick={() => handleRespond(req.id, 'rejected', displayName)}
                           disabled={isLoading}
                           title="Reddet"
                           className="p-2 bg-[#182229] hover:bg-red-500/20 text-gray-400 hover:text-red-400 rounded-xl transition-all cursor-pointer disabled:opacity-50"
@@ -156,7 +156,7 @@ export default function FriendRequestsModal({
                           <X className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleRespond(req.id, 'accepted', sender.display_name)}
+                          onClick={() => handleRespond(req.id, 'accepted', displayName)}
                           disabled={isLoading}
                           title="Kabul Et"
                           className="flex items-center gap-1.5 px-3.5 py-2 bg-[#00a884] hover:bg-[#008f72] text-[#111b21] rounded-xl text-xs font-bold shadow transition-all transform active:scale-95 cursor-pointer disabled:opacity-50"
@@ -189,6 +189,8 @@ export default function FriendRequestsModal({
               ) : (
                 requests.outgoing.map((req) => {
                   const receiver = req.receiver || {};
+                  const displayName = receiver.display_name || receiver.username || 'Kullanıcı';
+                  const username = receiver.username || 'kullanici';
 
                   return (
                     <div
@@ -197,16 +199,16 @@ export default function FriendRequestsModal({
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <Avatar
-                          name={receiver.display_name || receiver.username}
-                          seed={receiver.avatar_seed || receiver.username}
+                          name={displayName}
+                          seed={receiver.avatar_seed || username}
                           size="md"
                         />
                         <div className="min-w-0">
                           <h4 className="text-sm font-bold text-[#e9edef] truncate">
-                            {receiver.display_name || receiver.username}
+                            {displayName}
                           </h4>
                           <p className="text-xs text-[#8696a0] font-mono truncate">
-                            @{receiver.username}
+                            @{username}
                           </p>
                         </div>
                       </div>

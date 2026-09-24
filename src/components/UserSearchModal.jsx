@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, UserPlus, Check, Clock, X, UserCheck, Sparkles, Loader2 } from 'lucide-react';
 import Avatar from './Avatar';
-import { searchUsers, sendFriendRequest } from '../lib/chatService';
+import { searchUsers, sendFriendRequest, sanitizeUsername, formatDisplayName } from '../lib/chatService';
 import { useToast } from './Toast';
 
 export default function UserSearchModal({ isOpen, onClose, currentUser, friends = [], onFriendRequestSent }) {
@@ -18,7 +18,6 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
     }
   }, [isOpen]);
 
-  // Arama Tetikleme
   useEffect(() => {
     if (!query.trim() || query.length < 2) {
       setResults([]);
@@ -28,7 +27,7 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
     const timer = setTimeout(async () => {
       try {
         setLoading(true);
-        const data = await searchUsers(query, currentUser?.id);
+        const data = await searchUsers(query, currentUser?.username);
         setResults(data);
       } catch (err) {
         console.error('Search error:', err);
@@ -38,36 +37,34 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [query, currentUser?.id]);
+  }, [query, currentUser?.username]);
 
   if (!isOpen) return null;
 
   const handleSendRequest = async (user) => {
     try {
-      setRequestStatusMap((prev) => ({ ...prev, [user.id]: 'loading' }));
-      const res = await sendFriendRequest(currentUser.id, user.id, user);
+      const uName = sanitizeUsername(user.username);
+      setRequestStatusMap((prev) => ({ ...prev, [uName]: 'loading' }));
+      const res = await sendFriendRequest(currentUser.username, uName, user);
       
       if (res.autoAccepted) {
         showSuccess(`${user.display_name} ile arkadaş oldunuz! 🎉`);
-        setRequestStatusMap((prev) => ({ ...prev, [user.id]: 'accepted' }));
+        setRequestStatusMap((prev) => ({ ...prev, [uName]: 'accepted' }));
       } else {
         showSuccess(`${user.display_name} kullanıcısına sohbet isteği gönderildi! ✉️`);
-        setRequestStatusMap((prev) => ({ ...prev, [user.id]: 'sent' }));
+        setRequestStatusMap((prev) => ({ ...prev, [uName]: 'sent' }));
       }
 
       onFriendRequestSent && onFriendRequestSent();
     } catch (err) {
       showError(err.message || 'İstek gönderilemedi.');
-      setRequestStatusMap((prev) => ({ ...prev, [user.id]: 'error' }));
+      setRequestStatusMap((prev) => ({ ...prev, [sanitizeUsername(user.username)]: 'error' }));
     }
   };
 
-  const isAlreadyFriend = (userId, username) => {
-    return friends.some(
-      (f) =>
-        f.id === userId ||
-        f.username?.toLowerCase() === username?.toLowerCase()
-    );
+  const isAlreadyFriend = (username) => {
+    const clean = sanitizeUsername(username);
+    return friends.some((f) => sanitizeUsername(f.username) === clean);
   };
 
   return (
@@ -122,28 +119,30 @@ export default function UserSearchModal({ isOpen, onClose, currentUser, friends 
           )}
 
           {results.map((user) => {
-            const alreadyFriend = isAlreadyFriend(user.id, user.username);
-            const status = requestStatusMap[user.id];
+            const uName = sanitizeUsername(user.username);
+            const dispName = formatDisplayName(user.username, user.display_name);
+            const alreadyFriend = isAlreadyFriend(uName);
+            const status = requestStatusMap[uName];
 
             return (
               <div
-                key={user.id}
+                key={uName}
                 className="pt-2.5 first:pt-0 flex items-center justify-between gap-3 group"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <Avatar
-                    name={user.display_name || user.username}
-                    seed={user.avatar_seed || user.username}
+                    name={dispName}
+                    seed={user.avatar_seed || uName}
                     size="md"
                     isOnline={user.is_online}
                     showStatus={true}
                   />
                   <div className="min-w-0">
                     <h4 className="text-sm font-semibold text-[#e9edef] truncate">
-                      {user.display_name || user.username}
+                      {dispName}
                     </h4>
                     <p className="text-xs text-[#8696a0] font-mono truncate">
-                      @{user.username}
+                      @{uName}
                     </p>
                     {user.bio && (
                       <p className="text-[11px] text-[#8696a0]/80 truncate mt-0.5 max-w-[180px]">
