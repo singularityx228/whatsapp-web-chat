@@ -16,6 +16,7 @@ import {
   UserCheck,
   Heart,
   ThumbsUp,
+  Phone,
 } from 'lucide-react';
 import Avatar from './Avatar';
 import {
@@ -42,6 +43,7 @@ export default function ChatArea({
   activeFriend,
   messages = [],
   onBack,
+  onStartCall,
   onMessageSent,
   onChatCleared,
 }) {
@@ -264,9 +266,11 @@ export default function ChatArea({
     );
   }
 
-  const filteredMessages = messages.filter((m) => {
+  const filteredMessages = (Array.isArray(messages) ? messages : []).filter((m) => {
+    if (!m || typeof m !== 'object') return false;
     if (!searchInChat.trim()) return true;
-    return m.content?.toLowerCase().includes(searchInChat.toLowerCase());
+    const content = typeof m.content === 'string' ? m.content : '';
+    return content.toLowerCase().includes(searchInChat.toLowerCase());
   });
 
   return (
@@ -466,7 +470,7 @@ export default function ChatArea({
                     {/* Message Content & Action Icons */}
                     <div className="flex items-start justify-between gap-3">
                       <p className="whitespace-pre-wrap break-words word-break flex-1 select-text">
-                        {msg.content}
+                        {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || '')}
                       </p>
 
                       <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity flex-shrink-0 -mr-1 -mt-0.5">
@@ -495,8 +499,8 @@ export default function ChatArea({
                     </div>
 
                     {/* Reactions Display */}
-                    {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                      <div className="flex items-center gap-1 mt-1">
+                    {msg.reactions && typeof msg.reactions === 'object' && Object.keys(msg.reactions).length > 0 && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
                         {Object.entries(msg.reactions).map(([user, emo]) => (
                           <span
                             key={user}

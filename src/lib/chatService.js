@@ -233,7 +233,7 @@ export const getBlockedUsers = () => {
 
 export const isUserBlocked = (myUsername, targetUsername) => {
   const target = sanitizeUsername(targetUsername);
-  return cachedBlocked.includes(target);
+  return Array.isArray(cachedBlocked) && cachedBlocked.includes(target);
 };
 
 export const blockUser = async (myUsername, targetUsername) => {
@@ -557,13 +557,15 @@ export const setTypingStatus = async (sender, receiver, isTyping) => {
 };
 
 export const checkIsPartnerTyping = async (partner, me) => {
-  const s = sanitizeUsername(partner);
-  const r = sanitizeUsername(me);
-  const key = `typing_${s}_to_${r}`;
-  const data = await cloudGet(key);
-  if (data && data.isTyping && Date.now() - data.timestamp < 3500) {
-    return true;
-  }
+  try {
+    const s = sanitizeUsername(partner);
+    const r = sanitizeUsername(me);
+    const key = `typing_${s}_to_${r}`;
+    const data = await cloudGet(key);
+    if (data && typeof data === 'object' && data.isTyping && typeof data.timestamp === 'number' && Date.now() - data.timestamp < 3500) {
+      return true;
+    }
+  } catch {}
   return false;
 };
 
