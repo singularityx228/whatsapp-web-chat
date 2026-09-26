@@ -8,6 +8,7 @@ import UserSearchModal from './components/UserSearchModal';
 import FriendRequestsModal from './components/FriendRequestsModal';
 import UserProfileModal from './components/UserProfileModal';
 import InstallAppModal from './components/InstallAppModal';
+import VoiceCallModal from './components/VoiceCallModal';
 import {
   getFriends,
   getFriendRequests,
@@ -15,7 +16,16 @@ import {
   updateUserProfile,
   subscribeToChatEvents,
   sanitizeUsername,
+  formatDisplayName,
 } from './lib/chatService';
+import {
+  startVoiceCall,
+  startCallSignalListener,
+} from './lib/callService';
+import {
+  requestNotificationPermission,
+  showDesktopNotification,
+} from './lib/notificationService';
 
 function MainApp() {
   const { showSuccess, showError, showInfo } = useToast();
@@ -37,6 +47,10 @@ function MainApp() {
   const [lastMessagesMap, setLastMessagesMap] = useState({});
   const [unreadCountMap, setUnreadCountMap] = useState({});
   const [deferredPrompt, setDeferredPrompt] = useState(null);
+
+  // Sesli Arama Durumları (Voice Call States)
+  const [callState, setCallState] = useState({ status: 'idle', partnerUsername: null, partnerDisplayName: null });
+  const [incomingCall, setIncomingCall] = useState(null);
 
   // Modals
   const [isAuthOpen, setIsAuthOpen] = useState(!currentUser);
@@ -66,6 +80,16 @@ function MainApp() {
       }
     } else {
       setIsInstallOpen(true);
+    }
+  };
+
+  // Sesli Arama Başlatma
+  const handleStartCall = async (friend) => {
+    if (!currentUser || !friend) return;
+    try {
+      await startVoiceCall(currentUser.username, friend.username, friend.display_name);
+    } catch (err) {
+      showError(err.message || 'Arama başlatılamadı. Mikrofon iznini kontrol edin.');
     }
   };
 
@@ -99,12 +123,13 @@ function MainApp() {
     }
   }, [currentUser, activeFriend]);
 
-  // Giriş / Kullanıcı değişimi
+  // Giriş / Kullanıcı değişimi & Bildirim İzni İsteme
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem('whatsup_current_user', JSON.stringify(currentUser));
       setIsAuthOpen(false);
       reloadFriendsAndRequests();
+      requestNotificationPermission(); // Masaüstü bildirim izni iste
     } else {
       localStorage.removeItem('whatsup_current_user');
       setIsAuthOpen(true);
@@ -114,6 +139,28 @@ function MainApp() {
     }
   }, [currentUser, reloadFriendsAndRequests]);
 
+  // Sesli Arama Sinyal Dinleyicisi
+  useEffect(() => {
+    if (!currentUser) return;
+    const myUsername = sanitizeUsername(currentUser.username);
+
+    const cleanup = startCallSignalListener(
+      myUsername,
+      (incoming) => {
+        setIncomingCall(incoming);
+        showDesktopNotification(`Gelen Sesli Arama: @${incoming.callerUsername}`, {
+          body: 'Sizi WhatsApp sesli araması ile arıyor...',
+          tag: 'voice-call-incoming',
+        });
+      },
+      (state) => {
+        setCallState(state);
+      }
+    );
+
+    return () => cleanup && cleanup();
+  }, [currentUser]);
+
   // Aktif arkadaş değiştiğinde ilk yükleme
   useEffect(() => {
     if (activeFriend) {
@@ -121,7 +168,7 @@ function MainApp() {
     }
   }, [activeFriend, loadActiveMessages]);
 
-  // Aktif Sohbet Canlı Mesaj Yoklama (Her 1.5 saniyede buluttan çek)
+  // Aktif Sohbet Canlı Mesaj Yoklama (1.5s Polling)
   useEffect(() => {
     if (!currentUser || !activeFriend) return;
 
@@ -156,18 +203,30 @@ function MainApp() {
         const otherName = sId === myName ? rId : sId;
         setLastMessagesMap((prev) => ({ ...prev, [otherName]: msg }));
 
+        // Masaüstü ve Toast Bildirimi
         if (rId === myName && sId !== activeName) {
           setUnreadCountMap((prev) => ({
             ...prev,
             [sId]: (prev[sId] || 0) + 1,
           }));
           showInfo(`@${sId} kullanıcısından yeni bir mesaj! 💬`);
+
+          // Masaüstü Sistem Bildirimi Fırlat
+          showDesktopNotification(`Whatsup: @${sId}`, {
+            body: msg.content,
+            tag: `msg-${sId}`,
+          });
         }
       }
 
       // 2. Yeni İstek
       else if (eventType === 'NEW_FRIEND_REQUEST' || eventType === 'REQUEST_SENT') {
         reloadFriendsAndRequests();
+        if (eventType === 'NEW_FRIEND_REQUEST') {
+          showDesktopNotification('Yeni Sohbet İsteği!', {
+            body: 'Bir kullanıcı sizinle mesajlaşmak için istek gönderdi.',
+          });
+        }
       }
 
       // 3. İstek Kabul Edildi
@@ -244,6 +303,7 @@ function MainApp() {
           activeFriend={activeFriend}
           messages={messages}
           onBack={() => setActiveFriend(null)}
+          onStartCall={handleStartCall}
           onMessageSent={() => {
             loadActiveMessages();
             reloadFriendsAndRequests();
@@ -303,6 +363,14 @@ function MainApp() {
           onInstallPrompt={handleInstallClick}
         />
       )}
+
+      {/* Sesli Arama Ekranı (WebRTC Voice Call) */}
+      <VoiceCallModal
+        callState={callState}
+        incomingCall={incomingCall}
+        currentUser={currentUser}
+        onClearIncomingCall={() => setIncomingCall(null)}
+      />
     </div>
   );
 }

@@ -309,6 +309,16 @@ export default function ChatArea({
 
         {/* Header Actions */}
         <div className="flex items-center gap-1 text-[#aebac1] relative">
+          {/* Sesli Arama Butonu */}
+          <button
+            onClick={() => onStartCall && onStartCall(activeFriend)}
+            disabled={isBlocked}
+            className="p-2 rounded-full hover:bg-[#2a3942] hover:text-[#00a884] transition-colors cursor-pointer disabled:opacity-40"
+            title="Sesli Arama Başlat"
+          >
+            <Phone className="w-5 h-5" />
+          </button>
+
           <button
             onClick={() => setShowSearchBox(!showSearchBox)}
             className={`p-2 rounded-full hover:bg-[#2a3942] hover:text-white transition-colors cursor-pointer ${
