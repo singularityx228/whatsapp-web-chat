@@ -76,15 +76,17 @@ export default function ChatArea({
 
   // Yeni mesaj geldiğinde ses çal
   useEffect(() => {
-    if (messages.length > prevMsgCountRef.current) {
+    if (Array.isArray(messages) && messages.length > prevMsgCountRef.current) {
       const lastMsg = messages[messages.length - 1];
-      const sender = sanitizeUsername(lastMsg.sender_username || lastMsg.sender_id);
-      if (sender !== myUsername) {
-        playMessageReceivedSound();
+      if (lastMsg && typeof lastMsg === 'object') {
+        const sender = sanitizeUsername(lastMsg.sender_username || lastMsg.sender_id);
+        if (sender !== myUsername) {
+          playMessageReceivedSound();
+        }
       }
     }
-    prevMsgCountRef.current = messages.length;
-  }, [messages.length, myUsername]);
+    prevMsgCountRef.current = Array.isArray(messages) ? messages.length : 0;
+  }, [messages?.length, myUsername]);
 
   // Karşı tarafın yazıyor durumunu yoklama
   useEffect(() => {

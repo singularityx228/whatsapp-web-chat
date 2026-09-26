@@ -21,9 +21,9 @@ export default function Avatar({
 }) {
   const [imgError, setImgError] = useState(false);
 
-  const cleanName = name || 'User';
-  const initial = cleanName.charAt(0).toUpperCase();
-  const seedString = seed || cleanName;
+  const cleanName = typeof name === 'string' && name.trim() ? name.trim() : (name ? String(name) : 'User');
+  const initial = cleanName.charAt(0).toUpperCase() || 'U';
+  const seedString = typeof seed === 'string' && seed.trim() ? seed.trim() : (seed ? String(seed) : cleanName);
 
   // Deterministik renk seçimi
   let hash = 0;

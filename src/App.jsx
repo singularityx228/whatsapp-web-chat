@@ -378,7 +378,7 @@ function MainApp() {
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, errorInfo: null };
   }
 
   static getDerivedStateFromError(error) {
@@ -387,7 +387,27 @@ class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('App Error Caught:', error, errorInfo);
+    this.setState({ errorInfo });
   }
+
+  handleClearAndReload = () => {
+    try {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (let registration of registrations) {
+            registration.unregister();
+          }
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then((names) => {
+          for (let name of names) caches.delete(name);
+        });
+      }
+    } catch {}
+    this.setState({ hasError: false });
+    window.location.reload(true);
+  };
 
   render() {
     if (this.state.hasError) {
@@ -396,19 +416,39 @@ class ErrorBoundary extends React.Component {
           <div className="w-16 h-16 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center text-2xl font-bold">
             ⚠️
           </div>
-          <h2 className="text-xl font-bold">Bir görüntüleme hatası oluştu</h2>
+          <h2 className="text-xl font-bold">Bir Görüntüleme Hatası Oluştu</h2>
           <p className="text-xs text-gray-400 max-w-sm">
-            Sayfa otomatik olarak kurtarılabilir. Lütfen aşağıdaki butona basarak sohbeti yenileyin.
+            Tarayıcınızdaki eski önbellek veya veri uyuşmazlığı nedeniyle bir hata oluştu. Aşağıdaki butona basarak sayfayı yenileyebilirsiniz.
           </p>
-          <button
-            onClick={() => {
-              this.setState({ hasError: false });
-              window.location.reload();
-            }}
-            className="px-6 py-2.5 bg-[#00a884] hover:bg-[#008f72] text-[#111b21] font-bold text-sm rounded-xl transition-transform active:scale-95 cursor-pointer shadow-lg"
-          >
-            Sohbeti Yenile
-          </button>
+
+          {this.state.error && (
+            <div className="max-w-md w-full p-3 bg-[#182229] border border-red-500/30 rounded-xl text-left text-xs font-mono text-red-300 overflow-x-auto">
+              <p className="font-bold text-red-400">{this.state.error.toString()}</p>
+              {this.state.errorInfo?.componentStack && (
+                <pre className="text-[10px] text-gray-400 mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap">
+                  {this.state.errorInfo.componentStack}
+                </pre>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-3 justify-center pt-2">
+            <button
+              onClick={this.handleClearAndReload}
+              className="px-6 py-2.5 bg-[#00a884] hover:bg-[#008f72] text-[#111b21] font-bold text-sm rounded-xl transition-transform active:scale-95 cursor-pointer shadow-lg"
+            >
+              Önbelleği Temizle & Sohbeti Yenile
+            </button>
+            <button
+              onClick={() => {
+                localStorage.removeItem('whatsup_current_user');
+                this.handleClearAndReload();
+              }}
+              className="px-4 py-2.5 bg-[#202c33] hover:bg-[#2a3942] text-gray-300 font-medium text-sm rounded-xl transition-colors cursor-pointer border border-[#2a3942]"
+            >
+              Yeniden Giriş Yap
+            </button>
+          </div>
         </div>
       );
     }
