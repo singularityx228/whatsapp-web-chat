@@ -375,10 +375,53 @@ function MainApp() {
   );
 }
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('App Error Caught:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-screen w-screen flex-col items-center justify-center bg-[#0b141a] text-white p-6 text-center space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center text-2xl font-bold">
+            ⚠️
+          </div>
+          <h2 className="text-xl font-bold">Bir görüntüleme hatası oluştu</h2>
+          <p className="text-xs text-gray-400 max-w-sm">
+            Sayfa otomatik olarak kurtarılabilir. Lütfen aşağıdaki butona basarak sohbeti yenileyin.
+          </p>
+          <button
+            onClick={() => {
+              this.setState({ hasError: false });
+              window.location.reload();
+            }}
+            className="px-6 py-2.5 bg-[#00a884] hover:bg-[#008f72] text-[#111b21] font-bold text-sm rounded-xl transition-transform active:scale-95 cursor-pointer shadow-lg"
+          >
+            Sohbeti Yenile
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   return (
-    <ToastProvider>
-      <MainApp />
-    </ToastProvider>
+    <ErrorBoundary>
+      <ToastProvider>
+        <MainApp />
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }

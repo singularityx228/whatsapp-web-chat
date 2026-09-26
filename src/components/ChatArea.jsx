@@ -216,8 +216,10 @@ export default function ChatArea({
   };
 
   const formatTime = (isoString) => {
+    if (!isoString) return '';
     try {
       const d = new Date(isoString);
+      if (isNaN(d.getTime())) return '';
       return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } catch {
       return '';
@@ -225,8 +227,10 @@ export default function ChatArea({
   };
 
   const formatDateHeader = (isoString) => {
+    if (!isoString) return 'Bugün';
     try {
       const d = new Date(isoString);
+      if (isNaN(d.getTime())) return 'Bugün';
       const now = new Date();
       if (d.toDateString() === now.toDateString()) return 'Bugün';
       
@@ -236,7 +240,7 @@ export default function ChatArea({
 
       return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
     } catch {
-      return '';
+      return 'Bugün';
     }
   };
 
@@ -410,10 +414,20 @@ export default function ChatArea({
             const isCopied = copiedMsgId === msg.id;
             const showReactions = activeReactionMsgId === msg.id;
 
-            const showDateHeader =
-              index === 0 ||
-              new Date(messages[index - 1].created_at).toDateString() !==
-                new Date(msg.created_at).toDateString();
+            let showDateHeader = false;
+            try {
+              if (index === 0) {
+                showDateHeader = true;
+              } else if (filteredMessages[index - 1]?.created_at && msg.created_at) {
+                const prevD = new Date(filteredMessages[index - 1].created_at);
+                const currD = new Date(msg.created_at);
+                if (!isNaN(prevD.getTime()) && !isNaN(currD.getTime())) {
+                  showDateHeader = prevD.toDateString() !== currD.toDateString();
+                }
+              }
+            } catch {
+              showDateHeader = false;
+            }
 
             return (
               <React.Fragment key={msg.id || index}>
