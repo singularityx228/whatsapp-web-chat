@@ -1,7 +1,8 @@
 // ==============================================================================
-// WHATSUP WEBRTC HIGH-QUALITY VOICE CALLING ENGINE
+// WHATSUP WEBRTC HIGH-QUALITY VOICE CALLING ENGINE (FULL SDP GATHERING)
 // - Kristal Netliğinde Sesli Arama (WebRTC P2P Audio Stream)
-// - STUN Sunucusu Desteği (Google Public STUN)
+// - Google STUN Sunucusu Desteği (STUN 19302)
+// - Tam SDP Paketleme (KVDB Race Condition Bağışık)
 // - Mikrofon Susturma / Hoparlör Yönetimi
 // - Arama Süresi Sayacı & WhatsApp Zil / Çalma Sesleri
 // ==============================================================================
@@ -13,6 +14,7 @@ import {
   stopCallingTone,
   playCallConnectedSound,
   playCallEndedSound,
+  unlockAudio,
 } from './soundEffects';
 import { sanitizeUsername } from './chatService';
 
@@ -29,6 +31,8 @@ const ICE_SERVERS = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
   ],
 };
 
@@ -37,30 +41,23 @@ let localStream = null;
 let remoteAudioElement = null;
 let callCheckTimer = null;
 let onCallStateChangeCallback = null;
+let activeCallId = null;
 
-// Sinyal Gönder / Al
-const sendSignal = async (targetUsername, payload) => {
-  const target = sanitizeUsername(targetUsername);
-  const key = `call_signal_${target}`;
-  const data = {
-    ...payload,
-    timestamp: Date.now(),
-  };
-
+// Bulut Key-Value Yardımcıları
+const putCloudData = async (key, data) => {
+  const json = JSON.stringify(data);
   for (const ep of CLOUD_ENDPOINTS) {
     try {
       await fetch(`${ep}/${encodeURIComponent(key)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: json,
       });
     } catch {}
   }
 };
 
-const getSignal = async (myUsername) => {
-  const my = sanitizeUsername(myUsername);
-  const key = `call_signal_${my}`;
+const getCloudData = async (key) => {
   for (const ep of CLOUD_ENDPOINTS) {
     try {
       const res = await fetch(`${ep}/${encodeURIComponent(key)}?nocache=${Date.now()}`);
@@ -68,20 +65,6 @@ const getSignal = async (myUsername) => {
     } catch {}
   }
   return null;
-};
-
-const clearSignal = async (myUsername) => {
-  const my = sanitizeUsername(myUsername);
-  const key = `call_signal_${my}`;
-  for (const ep of CLOUD_ENDPOINTS) {
-    try {
-      await fetch(`${ep}/${encodeURIComponent(key)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'NONE', timestamp: Date.now() }),
-      });
-    } catch {}
-  }
 };
 
 // ==========================================
@@ -92,12 +75,22 @@ export const startVoiceCall = async (myUsername, targetUsername, targetDisplayNa
   const my = sanitizeUsername(myUsername);
   const target = sanitizeUsername(targetUsername);
 
+  unlockAudio();
+
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
   } catch (err) {
-    throw new Error('Mikrofon erişim izni verilmedi!');
+    throw new Error('Mikrofon erişim izni verilmedi! Lütfen tarayıcı ayarlarından mikrofonu açın.');
   }
 
+  activeCallId = `call_${my}_${target}_${Date.now()}`;
   peerConnection = new RTCPeerConnection(ICE_SERVERS);
 
   // Yerel ses kanalını ekle
@@ -110,28 +103,43 @@ export const startVoiceCall = async (myUsername, targetUsername, targetDisplayNa
     handleRemoteStream(event.streams[0]);
   };
 
-  // ICE adayları
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      sendSignal(target, {
-        type: 'ICE_CANDIDATE',
-        from: my,
-        candidate: event.candidate,
-      });
-    }
-  };
-
   // WebRTC Offer oluştur
-  const offer = await peerConnection.createOffer();
+  const offer = await peerConnection.createOffer({
+    offerToReceiveAudio: true,
+    offerToReceiveVideo: false,
+  });
   await peerConnection.setLocalDescription(offer);
 
-  // Buluta sinyal gönder
-  await sendSignal(target, {
+  // STUN ICE adaylarının SDP içerisine toplanmasını bekle (Maks 1.2 sn)
+  if (peerConnection.iceGatheringState !== 'complete') {
+    await new Promise((resolve) => {
+      const checkState = () => {
+        if (peerConnection?.iceGatheringState === 'complete') {
+          peerConnection.removeEventListener('icegatheringstatechange', checkState);
+          resolve();
+        }
+      };
+      peerConnection.addEventListener('icegatheringstatechange', checkState);
+      setTimeout(resolve, 1200);
+    });
+  }
+
+  // Buluta Teklifi Yaz
+  const callOfferPayload = {
+    callId: activeCallId,
     type: 'CALL_OFFER',
-    from: my,
-    fromDisplayName: my,
-    offer: offer,
-  });
+    caller: my,
+    callerDisplayName: my,
+    target: target,
+    offer: {
+      type: peerConnection.localDescription.type,
+      sdp: peerConnection.localDescription.sdp,
+    },
+    status: 'ringing',
+    timestamp: Date.now(),
+  };
+
+  await putCloudData(`call_offer_${target}`, callOfferPayload);
 
   startCallingTone();
 
@@ -141,6 +149,7 @@ export const startVoiceCall = async (myUsername, targetUsername, targetDisplayNa
       partnerUsername: target,
       partnerDisplayName: targetDisplayName || target,
       isMuted: false,
+      callId: activeCallId,
     });
   }
 
@@ -151,18 +160,27 @@ export const startVoiceCall = async (myUsername, targetUsername, targetDisplayNa
 // ARAMAYI KABUL ETME (Aranan Taraf)
 // ==========================================
 
-export const acceptIncomingCall = async (myUsername, callerUsername, offer) => {
+export const acceptIncomingCall = async (myUsername, callerUsername, offerData, callId) => {
   const my = sanitizeUsername(myUsername);
   const caller = sanitizeUsername(callerUsername);
 
   stopRingtone();
+  unlockAudio();
 
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
   } catch (err) {
     throw new Error('Mikrofon erişim izni verilmedi!');
   }
 
+  activeCallId = callId || `call_${caller}_${my}`;
   peerConnection = new RTCPeerConnection(ICE_SERVERS);
 
   localStream.getTracks().forEach((track) => {
@@ -173,25 +191,42 @@ export const acceptIncomingCall = async (myUsername, callerUsername, offer) => {
     handleRemoteStream(event.streams[0]);
   };
 
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      sendSignal(caller, {
-        type: 'ICE_CANDIDATE',
-        from: my,
-        candidate: event.candidate,
-      });
-    }
-  };
-
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(offerData));
   const answer = await peerConnection.createAnswer();
   await peerConnection.setLocalDescription(answer);
 
-  await sendSignal(caller, {
+  // ICE adaylarını bekle (Maks 1.2 sn)
+  if (peerConnection.iceGatheringState !== 'complete') {
+    await new Promise((resolve) => {
+      const checkState = () => {
+        if (peerConnection?.iceGatheringState === 'complete') {
+          peerConnection.removeEventListener('icegatheringstatechange', checkState);
+          resolve();
+        }
+      };
+      peerConnection.addEventListener('icegatheringstatechange', checkState);
+      setTimeout(resolve, 1200);
+    });
+  }
+
+  // Buluta Yanıtı Yaz
+  const answerPayload = {
+    callId: activeCallId,
     type: 'CALL_ANSWER',
-    from: my,
-    answer: answer,
-  });
+    caller: caller,
+    responder: my,
+    answer: {
+      type: peerConnection.localDescription.type,
+      sdp: peerConnection.localDescription.sdp,
+    },
+    status: 'connected',
+    timestamp: Date.now(),
+  };
+
+  await Promise.all([
+    putCloudData(`call_answer_${caller}`, answerPayload),
+    putCloudData(`call_offer_${my}`, { status: 'accepted', timestamp: Date.now() }),
+  ]);
 
   playCallConnectedSound();
 
@@ -201,6 +236,7 @@ export const acceptIncomingCall = async (myUsername, callerUsername, offer) => {
       partnerUsername: caller,
       partnerDisplayName: caller,
       isMuted: false,
+      callId: activeCallId,
     });
   }
 
@@ -216,15 +252,23 @@ export const endCall = async (myUsername, partnerUsername) => {
   stopCallingTone();
   playCallEndedSound();
 
-  if (partnerUsername) {
-    sendSignal(partnerUsername, {
-      type: 'CALL_END',
-      from: myUsername,
-    });
-  }
+  const my = sanitizeUsername(myUsername);
+  const partner = sanitizeUsername(partnerUsername);
 
-  if (myUsername) {
-    clearSignal(myUsername);
+  const endPayload = {
+    type: 'CALL_ENDED',
+    status: 'ended',
+    from: my,
+    timestamp: Date.now(),
+  };
+
+  if (partner) {
+    putCloudData(`call_offer_${partner}`, endPayload);
+    putCloudData(`call_answer_${partner}`, endPayload);
+  }
+  if (my) {
+    putCloudData(`call_offer_${my}`, endPayload);
+    putCloudData(`call_answer_${my}`, endPayload);
   }
 
   if (localStream) {
@@ -242,6 +286,8 @@ export const endCall = async (myUsername, partnerUsername) => {
     remoteAudioElement.remove();
     remoteAudioElement = null;
   }
+
+  activeCallId = null;
 
   if (onCallStateChangeCallback) {
     onCallStateChangeCallback({
@@ -270,6 +316,7 @@ const handleRemoteStream = (stream) => {
   if (!remoteAudioElement) {
     remoteAudioElement = document.createElement('audio');
     remoteAudioElement.autoplay = true;
+    remoteAudioElement.playsInline = true;
     document.body.appendChild(remoteAudioElement);
   }
   remoteAudioElement.srcObject = stream;
@@ -277,61 +324,71 @@ const handleRemoteStream = (stream) => {
 };
 
 // ==========================================
-// GELEN ARAMA SİNYALİ DİNLEYİCİSİ (Polling Engine)
+// GELEN ARAMA VE YANIT DİNLEYİCİSİ (Polling Engine)
 // ==========================================
 
 export const startCallSignalListener = (myUsername, onIncomingCall, onStateUpdate) => {
   if (!myUsername) return;
+  const my = sanitizeUsername(myUsername);
   onCallStateChangeCallback = onStateUpdate;
 
   if (callCheckTimer) clearInterval(callCheckTimer);
 
   callCheckTimer = setInterval(async () => {
     try {
-      const signal = await getSignal(myUsername);
-      if (!signal || !signal.type || Date.now() - signal.timestamp > 12000) return;
-
-      // 1. Gelen Arama Teklifi (Incoming Call)
-      if (signal.type === 'CALL_OFFER') {
+      // 1. Kendi adımıza gelen bir arama teklifi var mı?
+      const incomingOffer = await getCloudData(`call_offer_${my}`);
+      if (
+        incomingOffer &&
+        incomingOffer.type === 'CALL_OFFER' &&
+        incomingOffer.status === 'ringing' &&
+        Date.now() - incomingOffer.timestamp < 25000
+      ) {
         startRingtone();
         if (onIncomingCall) {
           onIncomingCall({
-            callerUsername: signal.from,
-            callerDisplayName: signal.fromDisplayName || signal.from,
-            offer: signal.offer,
+            callerUsername: incomingOffer.caller,
+            callerDisplayName: incomingOffer.callerDisplayName || incomingOffer.caller,
+            offer: incomingOffer.offer,
+            callId: incomingOffer.callId,
           });
         }
       }
 
-      // 2. Arama Karşı Tarafça Kabul Edildi (Call Answered)
-      else if (signal.type === 'CALL_ANSWER' && peerConnection) {
+      // 2. Başlattığımız arama için karşı taraftan cevap geldi mi?
+      const myAnswer = await getCloudData(`call_answer_${my}`);
+      if (
+        myAnswer &&
+        myAnswer.type === 'CALL_ANSWER' &&
+        myAnswer.status === 'connected' &&
+        peerConnection &&
+        peerConnection.signalingState === 'have-local-offer' &&
+        Date.now() - myAnswer.timestamp < 25000
+      ) {
         stopCallingTone();
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.answer));
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(myAnswer.answer));
         playCallConnectedSound();
-        clearSignal(myUsername);
+        putCloudData(`call_answer_${my}`, { status: 'cleared', timestamp: Date.now() });
+
         if (onCallStateChangeCallback) {
           onCallStateChangeCallback({
             status: 'connected',
-            partnerUsername: signal.from,
-            partnerDisplayName: signal.from,
+            partnerUsername: myAnswer.responder,
+            partnerDisplayName: myAnswer.responder,
             isMuted: false,
           });
         }
       }
 
-      // 3. ICE Adayı Geldi
-      else if (signal.type === 'ICE_CANDIDATE' && peerConnection) {
-        try {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
-        } catch {}
-      }
-
-      // 4. Arama Sonlandırıldı
-      else if (signal.type === 'CALL_END') {
-        endCall(myUsername, null);
+      // 3. Arama sonlandırıldı mı?
+      if (
+        (incomingOffer && incomingOffer.status === 'ended' && Date.now() - incomingOffer.timestamp < 10000) ||
+        (myAnswer && myAnswer.status === 'ended' && Date.now() - myAnswer.timestamp < 10000)
+      ) {
+        endCall(my, null);
       }
     } catch (e) {}
-  }, 1800);
+  }, 1200);
 
   return () => {
     if (callCheckTimer) clearInterval(callCheckTimer);

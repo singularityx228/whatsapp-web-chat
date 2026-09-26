@@ -278,11 +278,12 @@ export default function ChatArea({
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0b141a] overflow-hidden select-text relative">
       {/* Top Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-[#202c33] border-b border-[#2a3942] z-20 select-none relative">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center justify-between px-2.5 sm:px-4 py-2 bg-[#202c33] border-b border-[#2a3942] z-20 select-none relative min-h-[56px]">
+        {/* Left: Back + Avatar + User Info */}
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 mr-1">
           <button
             onClick={onBack}
-            className="md:hidden p-1.5 -ml-1 text-[#aebac1] hover:text-white rounded-lg cursor-pointer"
+            className="md:hidden p-1.5 -ml-0.5 text-[#aebac1] hover:text-white rounded-lg cursor-pointer flex-shrink-0"
             title="Geri"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -296,11 +297,11 @@ export default function ChatArea({
             showStatus={true}
           />
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h3 className="text-sm font-bold text-[#e9edef] truncate flex items-center gap-1.5">
-              <span>{friendDisplayName}</span>
+              <span className="truncate">{friendDisplayName}</span>
               {isBlocked && (
-                <span className="text-[10px] px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded font-semibold">
+                <span className="text-[10px] px-1.5 py-0.2 bg-red-500/20 text-red-400 rounded font-semibold flex-shrink-0">
                   Engellendi
                 </span>
               )}
@@ -317,16 +318,16 @@ export default function ChatArea({
           </div>
         </div>
 
-        {/* Header Actions */}
-        <div className="flex items-center gap-1 text-[#aebac1] relative">
-          {/* Sesli Arama Butonu */}
+        {/* Right: Actions (CALL BUTTON, SEARCH, OPTIONS) */}
+        <div className="flex items-center gap-1 sm:gap-1.5 text-[#aebac1] relative flex-shrink-0">
+          {/* Sesli Arama Butonu - WhatsApp Yeşili Vurgulu */}
           <button
             onClick={() => onStartCall && onStartCall(activeFriend)}
             disabled={isBlocked}
-            className="p-2 rounded-full hover:bg-[#2a3942] hover:text-[#00a884] transition-colors cursor-pointer disabled:opacity-40"
-            title="Sesli Arama Başlat"
+            className="p-2 sm:p-2.5 rounded-full bg-[#00a884]/20 hover:bg-[#00a884]/35 text-[#00a884] hover:text-white transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center border border-[#00a884]/30"
+            title="WhatsApp Sesli Arama Başlat"
           >
-            <Phone className="w-5 h-5" />
+            <Phone className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
           </button>
 
           <button
@@ -336,7 +337,7 @@ export default function ChatArea({
             }`}
             title="Sohbette Ara"
           >
-            <Search className="w-5 h-5" />
+            <Search className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
           <button
@@ -344,7 +345,7 @@ export default function ChatArea({
             className="p-2 rounded-full hover:bg-[#2a3942] hover:text-white transition-colors cursor-pointer"
             title="Seçenekler"
           >
-            <MoreVertical className="w-5 h-5" />
+            <MoreVertical className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
           {/* Options Dropdown Menu */}

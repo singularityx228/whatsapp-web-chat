@@ -72,7 +72,7 @@ export default function VoiceCallModal({
             {/* Kabul Et */}
             <button
               onClick={async () => {
-                await acceptIncomingCall(currentUser?.username, incomingCall.callerUsername, incomingCall.offer);
+                await acceptIncomingCall(currentUser?.username, incomingCall.callerUsername, incomingCall.offer, incomingCall.callId);
                 onClearIncomingCall && onClearIncomingCall();
               }}
               title="Kabul Et"

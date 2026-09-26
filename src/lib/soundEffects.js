@@ -4,7 +4,7 @@ let audioCtx = null;
 let ringtoneInterval = null;
 let callingToneInterval = null;
 
-const getAudioContext = () => {
+export const getAudioContext = () => {
   if (!audioCtx) {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (AudioContext) {
@@ -12,10 +12,26 @@ const getAudioContext = () => {
     }
   }
   if (audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume();
+    audioCtx.resume().catch(() => {});
   }
   return audioCtx;
 };
+
+// Kullanıcı etkileşimiyle sesi çözme (iOS / Android / Chrome autoplay policy)
+export const unlockAudio = () => {
+  try {
+    const ctx = getAudioContext();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+  } catch (e) {}
+};
+
+if (typeof window !== 'undefined') {
+  ['click', 'touchstart', 'touchend', 'keydown'].forEach((evt) => {
+    window.addEventListener(evt, () => unlockAudio(), { once: false, passive: true });
+  });
+}
 
 // Mesaj Geldiğinde Çalan İnce WhatsApp Chime
 export const playMessageReceivedSound = () => {
@@ -30,7 +46,7 @@ export const playMessageReceivedSound = () => {
     osc.frequency.setValueAtTime(880, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08);
 
-    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
 
     osc.connect(gain);
@@ -54,7 +70,7 @@ export const playMessageSentSound = () => {
     osc.frequency.setValueAtTime(587.33, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.05);
 
-    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
 
     osc.connect(gain);
@@ -82,7 +98,7 @@ export const startRingtone = () => {
       osc1.frequency.setValueAtTime(750, ctx.currentTime);
       osc2.frequency.setValueAtTime(1000, ctx.currentTime);
 
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
 
       osc1.connect(gain);
@@ -121,7 +137,7 @@ export const startCallingTone = () => {
       osc.type = 'sine';
       osc.frequency.setValueAtTime(440, ctx.currentTime);
 
-      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.2);
 
       osc.connect(gain);
@@ -153,7 +169,7 @@ export const playCallConnectedSound = () => {
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(523.25, ctx.currentTime);
     osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1);
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -171,7 +187,7 @@ export const playCallEndedSound = () => {
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(440, ctx.currentTime);
     osc.frequency.setValueAtTime(330, ctx.currentTime + 0.15);
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
     osc.connect(gain);
     gain.connect(ctx.destination);
