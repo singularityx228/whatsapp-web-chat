@@ -168,13 +168,13 @@ function MainApp() {
     }
   }, [activeFriend, loadActiveMessages]);
 
-  // Aktif Sohbet Canlı Mesaj Yoklama (1.5s Polling)
+  // Aktif Sohbet Arka Plan Senkronizasyonu (SSE anlık iletir, bu ek güvenlik için)
   useEffect(() => {
     if (!currentUser || !activeFriend) return;
 
     const chatPollInterval = setInterval(() => {
       loadActiveMessages();
-    }, 1500);
+    }, 6000);
 
     return () => clearInterval(chatPollInterval);
   }, [currentUser, activeFriend, loadActiveMessages]);
